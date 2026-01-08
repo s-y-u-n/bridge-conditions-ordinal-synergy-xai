@@ -1,0 +1,10 @@
+active_scheme: CONTINUOUS_BCI
+
+target:
+  source: current_bci
+  year: 2020
+  column: current_bci
+
+schemes:
+  CONTINUOUS_BCI:
+    type: continuous_bci

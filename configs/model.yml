@@ -1,0 +1,16 @@
+target:
+  label_column: label
+
+model:
+  name: baseline_logistic
+  type: multiclass
+  random_state: 42
+
+training:
+  test_size: 0.2
+  random_state: 42
+
+metrics:
+  - accuracy
+  - mae
+  - qwk

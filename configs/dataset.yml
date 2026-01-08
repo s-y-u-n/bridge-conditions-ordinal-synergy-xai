@@ -1,0 +1,48 @@
+paths:
+  raw_csv: data/raw/bridge_conditions.csv
+  raw_clean_csv: data/processed/bridge_conditions_clean.csv
+  data_dictionary: docs/data_dictionary_bridge_conditions.md
+  structures_parquet: data/processed/structures.parquet
+  bci_long_parquet: data/processed/bci_long.parquet
+  features_parquet: data/processed/features.parquet
+  labels_parquet: data/processed/labels.parquet
+  next_rank_dataset_parquet: data/processed/next_rank_dataset.parquet
+
+io:
+  encoding: utf-8
+  rename_columns: true
+
+columns:
+  id: structure_id
+  structure_name: structure_name
+  highway_name: highway_name
+  latitude: latitude
+  longitude: longitude
+  category: category
+  subcategory_1: subcategory_1
+  type_1: type_1
+  material_1: material_1
+  year_built: year_built
+  last_major_rehab: last_major_rehab
+  last_minor_rehab: last_minor_rehab
+  number_span_cells: span_cells_count
+  span_details_m: span_details_m
+  deck_length_m: deck_or_culvert_length_m
+  width_total_m: width_total_m
+  region: region
+  county: county
+  operation_status: operation_status
+  owner: owner
+  last_inspection_date: last_inspection_date
+  current_bci: current_bci
+
+bci_years:
+  start: 2000
+  end: 2020
+  col_format: "bci_{year}"
+
+filters:
+  operation_status: "Open to traffic"
+
+inspection_year:
+  default: 2020

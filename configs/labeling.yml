@@ -1,0 +1,48 @@
+active_scheme: A
+
+target:
+  source: current_bci
+  year: 2020
+  column: current_bci
+
+schemes:
+  CONTINUOUS_BCI:
+    type: continuous_bci
+    output:
+      column: current_bci
+  A:
+    type: fixed_thresholds
+    labels:
+      - name: L3
+        min_inclusive: 85
+        max_inclusive: 100
+      - name: L2
+        min_inclusive: 70
+        max_exclusive: 85
+      - name: L1
+        min_inclusive: 55
+        max_exclusive: 70
+      - name: L0
+        min_inclusive: 0
+        max_exclusive: 55
+  B:
+    type: fixed_thresholds
+    labels:
+      - name: High
+        min_inclusive: 80
+        max_inclusive: 100
+      - name: Mid
+        min_inclusive: 60
+        max_exclusive: 80
+      - name: Low
+        min_inclusive: 0
+        max_exclusive: 60
+  R5_REHAB_FLOOR:
+    type: rehab_floor_ranks
+    n_ranks: 5
+    increase_delta: 0.5
+    distribution:
+      name: beta
+      alpha: 5.0
+      beta: 2.0
+    label_prefix: R

@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+*.egg
+.pytest_cache/
+.coverage
+.coverage.*
+.mypy_cache/
+.ruff_cache/
+.venv/
+.env/
+.envrc
+
+# Build
+build/
+dist/
+
+# Local cache
+.cache/
+
+# OS
+.DS_Store
+
+# Data and artifacts
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+artifacts/*
+!artifacts/.gitkeep
+
+# Notebooks
+.ipynb_checkpoints/

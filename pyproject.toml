@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "bridge-conditions-ordinal-synergy-xai"
+version = "0.1.0"
+description = "Ordinal modeling and synergy explainability for Ontario bridge conditions."
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+packages = [{ include = "bci_osxai", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+numpy = "^1.26.0"
+pandas = "^2.2.0"
+pyarrow = "^15.0.0"
+scikit-learn = "^1.4.0"
+pyyaml = "^6.0.1"
+shapiq = "^1.4.1"
+xgboost = "^3.1.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+
+[tool.poetry.scripts]
+bci-xai = "bci_osxai.cli.main:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,47 @@
+max_set_size: 3
+
+engine: shapiq
+
+shapiq:
+  index: k-SII
+  max_order: 2
+  budget: 300
+  background_size: 128
+  random_state: 42
+  verbose: false
+
+ordinal_metrics_max_order: 3
+
+progress:
+  enabled: true
+
+game_table:
+  enabled: true
+  n_samples: 300
+  max_order: 3
+  seed: 42
+  cache_dir: artifacts/game_tables_fast
+
+candidate_generation:
+  strategy: frequent_categories
+  min_support: 0.02
+  top_n_features: 12
+
+comparison:
+  rule: total_preorder
+  tie_policy: allow
+  allow_incomparability: true
+
+report:
+  top_k: 5
+  include_incomparability: true
+
+borda_shapley:
+  enabled: true
+  n_players: 10
+  max_order: 2
+  domain_max_size: 2
+  score_key: abs_value
+  tie_tol: 1.0e-12
+  missing_score: 0.0
+  top_k: 20
