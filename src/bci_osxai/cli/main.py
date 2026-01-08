@@ -24,23 +24,115 @@ from bci_osxai.preprocess.build_next_rank_dataset import (
 from bci_osxai.preprocess.clean_schema import normalize_column_whitespace
 from bci_osxai.preprocess.reshape_bci import build_bci_long
 from bci_osxai.synergy.report import build_synergy_report
-from bci_osxai.synergy.borda_shapley import BordaShapleySettings, borda_shapley_index
-from bci_osxai.synergy.group_lexcel import GroupLexcelSettings, group_lexcel_ranking
-from bci_osxai.synergy.group_ordinal_banzhaf import GroupOrdinalBanzhafSettings, group_ordinal_banzhaf
-from bci_osxai.synergy.shapiq_explain import ShapiqSettings, all_coalition_scores_shapiq, explain_interactions_shapiq
-from bci_osxai.synergy.game_table_cache import GameTableSettings, game_table_to_scored, load_or_build_game_table
+from bci_osxai.synergy.game_table import GameTableSettings, build_game_table, load_game_table, save_game_table
+from bci_osxai.synergy.lexcel import LexcelSettings, lexcel_ranking
 from bci_osxai.synergy.visualize import (
-    plot_borda_shapley_bar,
-    plot_group_lexcel_table,
-    plot_group_ordinal_banzhaf_bar,
     plot_interactions_bar,
 )
-from bci_osxai.utils.progress import is_progress_enabled
 
 
 def load_yaml(path: str | Path) -> Dict[str, Any]:
     with Path(path).open("r", encoding="utf-8") as handle:
         return yaml.safe_load(handle)
+
+
+def resolve_structure_id(dataset_config: Path, structure_id: str | None) -> str:
+    if structure_id is not None and str(structure_id).strip() != "":
+        return str(structure_id)
+    dataset_cfg = load_yaml(dataset_config)
+    default_id = (dataset_cfg.get("structure_id") or {}).get("default")
+    if default_id is None or str(default_id).strip() == "":
+        raise SystemExit(
+            "structure_id is required; pass `--id <structure_id>` or set `structure_id.default` in the dataset config."
+        )
+    return str(default_id)
+
+
+def top_sets_from_interactions_table(table: pd.DataFrame, *, top_k: int, min_order: int, max_order: int) -> list[dict[str, object]]:
+    results: list[dict[str, object]] = []
+    if table is None or table.empty:
+        return results
+    filtered = table[(table["order"] >= int(min_order)) & (table["order"] <= int(max_order))].copy()
+    if filtered.empty:
+        return results
+    filtered = filtered.sort_values("abs_value", ascending=False).head(int(top_k))
+    for _, row in filtered.iterrows():
+        feat = [x for x in str(row["coalition_key"]).split("|") if x]
+        results.append(
+            {
+                "set": feat,
+                "order": int(row["order"]),
+                "value": float(row["value"]),
+                "abs_value": float(row["abs_value"]),
+            }
+        )
+    return results
+
+
+def load_task_dataset(dataset_config: Path, *, task: str) -> tuple[pd.DataFrame, pd.Series]:
+    dataset_cfg = load_yaml(dataset_config)
+    paths = dataset_cfg["paths"]
+
+    if task == "next-rank":
+        next_path = paths.get("next_rank_dataset_parquet")
+        if not next_path:
+            raise SystemExit("next_rank_dataset_parquet is not configured in configs/dataset.yml")
+        ds = pd.read_parquet(next_path)
+        ds = ds[ds["label"].notna()].copy()
+        drop_cols = {
+            "structure_id",
+            "label",
+            "label_index",
+            "target_rank",
+            "target_rank_index",
+            "target_bci",
+            "year_next",
+            "current_rank",
+        }
+        X = ds.drop(columns=[c for c in drop_cols if c in ds.columns], errors="ignore")
+        y = ds["label"].astype("object")
+        return X, y
+
+    if task == "baseline":
+        features = pd.read_parquet(paths["features_parquet"])
+        labels = pd.read_parquet(paths["labels_parquet"])
+        merged = features.merge(labels[["structure_id", "label"]], on="structure_id", how="inner")
+        merged = merged[merged["label"].notna()].copy()
+        X = merged.drop(columns=["structure_id", "label"], errors="ignore")
+        y = merged["label"]
+        return X, y
+
+    raise ValueError(f"Unknown task: {task}")
+
+
+def build_or_load_game_table(dataset_config: Path, synergy_config: Path) -> pd.DataFrame:
+    synergy_cfg = load_yaml(synergy_config)
+    game_cfg = (synergy_cfg.get("game_table", {}) or {}) if isinstance(synergy_cfg, dict) else {}
+    if not bool(game_cfg.get("enabled", False)):
+        raise SystemExit("game_table is disabled in synergy config.")
+    cache_path = game_cfg.get("cache_path")
+    if not cache_path:
+        raise SystemExit("game_table.cache_path is required in synergy config.")
+
+    cache_file = Path(str(cache_path))
+    if cache_file.exists():
+        return load_game_table(cache_file)
+
+    if not bool(game_cfg.get("auto_build", False)):
+        raise SystemExit(f"game table not found: {cache_file} (run `bci-xai build-game-table` or set game_table.auto_build: true)")
+
+    X, y = load_task_dataset(dataset_config, task=str(game_cfg.get("task", "next-rank")))
+    settings = GameTableSettings(
+        enabled=True,
+        max_order=int(game_cfg.get("max_order", 2)),
+        n_coalitions=int(game_cfg.get("n_coalitions", 400)),
+        test_size=float(game_cfg.get("test_size", 0.25)),
+        metric=str(game_cfg.get("metric", "accuracy")),
+        seed=int(game_cfg.get("seed", 42)),
+    )
+    table = build_game_table(X=X, y=y, players=list(X.columns), settings=settings)
+    save_game_table(table, cache_file)
+    return table
 
 
 def write_report(report: Dict[str, Any], out_path: str | Path | None, stdout: bool) -> None:
@@ -97,6 +189,11 @@ def run_preprocess(dataset_config: Path, labeling_config: Path) -> None:
 
     inspection_year = dataset_cfg.get("inspection_year", {}).get("default")
     features = build_features(df, columns, inspection_year=inspection_year)
+    include = (dataset_cfg.get("feature_columns") or {}).get("include")
+    if include:
+        include_set = {str(c) for c in include}
+        include_set.add("structure_id")
+        features = features[[c for c in features.columns if c in include_set]].copy()
 
     scheme = labeling_cfg["active_scheme"]
     scheme_cfg = labeling_cfg["schemes"][scheme]
@@ -199,9 +296,9 @@ def run_train_next_rank(dataset_config: Path, model_out: Path) -> None:
 
 
 def _plot_next_rank_proba(classes: list[str], proba: list[float], output_path: Path, title: str) -> None:
-    from bci_osxai.synergy.shapiq_explain import _ensure_writable_caches  # noqa: PLC0415
+    from bci_osxai.utils.caches import ensure_writable_caches  # noqa: PLC0415
 
-    _ensure_writable_caches()
+    ensure_writable_caches()
 
     import matplotlib.pyplot as plt  # noqa: PLC0415
 
@@ -332,157 +429,38 @@ def run_explain_next_rank(
     model = load_model(model_path)
     pred = str(predict(model, X_model).iloc[0])
 
-    synergy_cfg = load_yaml(synergy_config)
-    progress_enabled = is_progress_enabled(synergy_cfg)
-    shapiq_cfg = synergy_cfg.get("shapiq", {})
-    settings = ShapiqSettings(
-        index=str(shapiq_cfg.get("index", "k-SII")),
-        max_order=int(shapiq_cfg.get("max_order", 2)),
-        budget=int(shapiq_cfg.get("budget", 2000)),
-        background_size=int(shapiq_cfg.get("background_size", 256)),
-        random_state=int(shapiq_cfg.get("random_state", 42)),
-        # shapiq's own tqdm is noisy; keep it off by default even when our progress is enabled.
-        verbose=bool(shapiq_cfg.get("verbose", False)),
-    )
-    top_k = int(synergy_cfg.get("report", {}).get("top_k", 5))
-
-    drop_cols = {
-        "structure_id",
-        "label",
-        "label_index",
-        "target_rank",
-        "target_rank_index",
-        "target_bci",
-        "year_next",
-        "current_rank",  # redundant with current_rank_index
-    }
-    background_X = next_ds.drop(columns=[c for c in drop_cols if c in next_ds.columns], errors="ignore")
-
-    # shapiq is typically the most expensive part (budget = number of masked evaluations).
-    # Cache the full interaction table for a given (structure_id, model, dataset, settings).
     safe_id = str(structure_id).replace("/", "_")
-    model_hash = hashlib.sha256(Path(model_path).read_bytes()).hexdigest()[:16]
-    players_key = hashlib.sha256(("|".join(list(X_model.columns))).encode("utf-8")).hexdigest()[:12]
-    try:
-        st = Path(next_path).stat()
-        dataset_fp = f"{st.st_size}-{st.st_mtime_ns}"
-    except Exception:
-        dataset_fp = "unknown"
-    shapiq_cache_file = (
-        Path("artifacts")
-        / "shapiq_cache"
-        / "next_rank"
-        / (
-            f"{safe_id}__{model_hash}__p{players_key}"
-            f"__idx{settings.index}__m{settings.max_order}__b{settings.budget}__bg{settings.background_size}__rs{settings.random_state}"
-            f"__ds{dataset_fp}.parquet"
-        )
-    )
+    synergy_cfg = load_yaml(synergy_config)
+    top_k = int(synergy_cfg.get("report", {}).get("top_k", 5))
+    game_table = build_or_load_game_table(dataset_config, Path(synergy_config))
 
-    top_sets = explain_interactions_shapiq(
-        model=model,
-        background_X=background_X,
-        x=X_model,
-        thresholds=None,
-        settings=settings,
-        top_k=top_k,
-        min_order=2,
-        cache_path=shapiq_cache_file,
-    )
+    # Treat game_table as a coalition preorder table.
+    # Keep the report shape compatible with earlier outputs.
+    max_order = int(pd.to_numeric(game_table["order"], errors="coerce").max()) if not game_table.empty else 2
+    top_sets = top_sets_from_interactions_table(table=game_table, top_k=top_k, min_order=2, max_order=max_order)
 
-    # Build/load a cached game table for ordinal set-metrics to avoid recomputing large universes.
-    game_cfg = synergy_cfg.get("game_table", {}) if isinstance(synergy_cfg, dict) else {}
-    use_game_table = bool(game_cfg.get("enabled", False))
-    if use_game_table:
-        gt = load_or_build_game_table(
-            model=model,
-            model_path=model_path,
-            structure_id=str(structure_id),
-            x_row=X_model,
-            background_X=background_X,
-            settings=GameTableSettings(
-                enabled=True,
-                n_samples=int(game_cfg.get("n_samples", 10_000)),
-                max_order=int(game_cfg.get("max_order", int(synergy_cfg.get("ordinal_metrics_max_order", 6)))),
-                seed=int(game_cfg.get("seed", 42)),
-                cache_dir=str(game_cfg.get("cache_dir", "artifacts/game_tables")),
-            ),
-            progress=progress_enabled,
+    lex_cfg = (synergy_cfg.get("lexcel", {}) or {}) if isinstance(synergy_cfg, dict) else {}
+    lex_enabled = bool(lex_cfg.get("enabled", False))
+    lexcel = None
+    if lex_enabled:
+        lex_max_order = lex_cfg.get("max_order")
+        lex_settings = LexcelSettings(
+            enabled=True,
+            score_key=str(lex_cfg.get("score_key", "abs_value")),
+            tie_tol=float(lex_cfg.get("tie_tol", 1.0e-12)),
+            min_order=int(lex_cfg.get("min_order", 1)),
+            max_order=int(lex_max_order) if lex_max_order is not None else max_order,
+            max_items=int(lex_cfg.get("max_items", 20)),
         )
-        all_scored = game_table_to_scored(gt)
-    else:
-        ordinal_max_order = int(synergy_cfg.get("ordinal_metrics_max_order", settings.max_order))
-        ordinal_settings = ShapiqSettings(
-            index=settings.index,
-            max_order=ordinal_max_order,
-            budget=settings.budget,
-            background_size=settings.background_size,
-            random_state=settings.random_state,
-            verbose=bool(shapiq_cfg.get("verbose", False)),
-        )
-        all_scored = all_coalition_scores_shapiq(
-            model=model,
-            background_X=background_X,
-            x=X_model,
-            thresholds=None,
-            settings=ordinal_settings,
-            min_order=1,
-            cache_path=shapiq_cache_file,
-        )
-    group_lexcel = group_lexcel_ranking(
-        all_scored,
-        settings=GroupLexcelSettings(score_key="abs_value", tie_tol=1e-12, max_items=20, fixed_order=2, progress=progress_enabled),
-    )
-    group_banzhaf = group_ordinal_banzhaf(
-        all_scored,
-        settings=GroupOrdinalBanzhafSettings(score_key="abs_value", tie_tol=1e-12, max_items=20, fixed_order=2, progress=progress_enabled),
-    )
-
-    borda_cfg = (synergy_cfg.get("borda_shapley", {}) or {}) if isinstance(synergy_cfg, dict) else {}
-    borda_shapley = None
-    if bool(borda_cfg.get("enabled", True)):
-        borda_shapley = borda_shapley_index(
-            all_scored,
-            settings=BordaShapleySettings(
-                n_players=int(borda_cfg.get("n_players", 10)),
-                max_order=int(borda_cfg.get("max_order", 2)),
-                domain_max_size=int(borda_cfg.get("domain_max_size", borda_cfg.get("max_order", 2))),
-                score_key=str(borda_cfg.get("score_key", "abs_value")),
-                tie_tol=float(borda_cfg.get("tie_tol", 1e-12)),
-                missing_score=float(borda_cfg.get("missing_score", 0.0)),
-                top_k=int(borda_cfg.get("top_k", 20)),
-                progress=progress_enabled,
-            ),
-        )
+        lexcel = lexcel_ranking(game_table, players=list(X_model.columns), settings=lex_settings)
 
     if plot:
-        # Lex-cel is not plotted; remove any stale file from earlier runs.
-        (Path("artifacts") / "reports" / f"{safe_id}_next_rank_group_lexcel.png").unlink(missing_ok=True)
         plot_interactions_bar(
             structure_id=str(structure_id),
             predicted_label=pred,
             interactions=top_sets,
             output_path=Path("artifacts") / "reports" / f"{safe_id}_next_rank_interactions.png",
         )
-        plot_group_lexcel_table(
-            structure_id=str(structure_id),
-            predicted_label=pred,
-            group_lexcel=group_lexcel,
-            output_path=Path("artifacts") / "reports" / f"{safe_id}_next_rank_group_lexcel_table.png",
-        )
-        plot_group_ordinal_banzhaf_bar(
-            structure_id=str(structure_id),
-            predicted_label=pred,
-            banzhaf=group_banzhaf,
-            output_path=Path("artifacts") / "reports" / f"{safe_id}_next_rank_group_ordinal_banzhaf.png",
-        )
-        if borda_shapley is not None:
-            plot_borda_shapley_bar(
-                structure_id=str(structure_id),
-                predicted_label=pred,
-                borda_shapley=borda_shapley,
-                output_path=Path("artifacts") / "reports" / f"{safe_id}_next_rank_borda_shapley.png",
-            )
 
     report = {
         "structure_id": str(structure_id),
@@ -491,11 +469,9 @@ def run_explain_next_rank(
         "current_rank": str(X_row["current_rank"].iloc[0]),
         "predicted_next_rank": pred,
         "synergy_top_k": top_sets,
-        "group_lexcel": group_lexcel,
-        "group_ordinal_banzhaf": group_banzhaf,
     }
-    if borda_shapley is not None:
-        report["borda_shapley"] = borda_shapley
+    if lexcel is not None:
+        report["lexcel"] = lexcel
     if out is None and not stdout:
         out = Path("artifacts") / "reports" / f"{safe_id}_next_rank_explain.yml"
     write_report(report, out, stdout)
@@ -523,40 +499,32 @@ def run_explain(
     X = row.drop(columns=["structure_id"], errors="ignore")
     prediction = str(predict(model, X).iloc[0])
 
-    top_sets = []
+    top_sets: list[dict[str, object]] = []
+    lexcel = None
     try:
         synergy_cfg = load_yaml(synergy_config)
-        if synergy_cfg.get("engine") == "shapiq":
-            labeling_cfg = load_yaml("configs/labeling.yml")
-            scheme = labeling_cfg["active_scheme"]
-            scheme_cfg = labeling_cfg["schemes"][scheme]
-            thresholds = scheme_cfg.get("labels")
+        top_k = int(synergy_cfg.get("report", {}).get("top_k", 5))
+        game_table = build_or_load_game_table(dataset_config, Path(synergy_config))
+        max_order = int(pd.to_numeric(game_table["order"], errors="coerce").max()) if not game_table.empty else 2
+        top_sets = top_sets_from_interactions_table(table=game_table, top_k=top_k, min_order=2, max_order=max_order)
 
-            shapiq_cfg = synergy_cfg.get("shapiq", {})
-            settings = ShapiqSettings(
-                index=str(shapiq_cfg.get("index", "k-SII")),
-                max_order=int(shapiq_cfg.get("max_order", 2)),
-                budget=int(shapiq_cfg.get("budget", 2000)),
-                background_size=int(shapiq_cfg.get("background_size", 256)),
-                random_state=int(shapiq_cfg.get("random_state", 42)),
-                verbose=bool(shapiq_cfg.get("verbose", False)),
+        lex_cfg = (synergy_cfg.get("lexcel", {}) or {}) if isinstance(synergy_cfg, dict) else {}
+        lex_enabled = bool(lex_cfg.get("enabled", False))
+        if lex_enabled:
+            lex_max_order = lex_cfg.get("max_order")
+            lex_settings = LexcelSettings(
+                enabled=True,
+                score_key=str(lex_cfg.get("score_key", "abs_value")),
+                tie_tol=float(lex_cfg.get("tie_tol", 1.0e-12)),
+                min_order=int(lex_cfg.get("min_order", 1)),
+                max_order=int(lex_max_order) if lex_max_order is not None else max_order,
+                max_items=int(lex_cfg.get("max_items", 20)),
             )
-            top_k = int(synergy_cfg.get("report", {}).get("top_k", 5))
-
-            background = features.drop(columns=["structure_id"], errors="ignore")
-            top_sets = explain_interactions_shapiq(
-                model=model,
-                background_X=background,
-                x=X,
-                thresholds=thresholds,
-                settings=settings,
-                top_k=top_k,
-                min_order=2,
-            )
+            lexcel = lexcel_ranking(game_table, players=list(X.columns), settings=lex_settings)
     except Exception:
         top_sets = []
 
-    report = build_synergy_report(structure_id=str(structure_id), predicted_label=prediction, top_sets=top_sets)
+    report = build_synergy_report(structure_id=str(structure_id), predicted_label=prediction, top_sets=top_sets, lexcel=lexcel)
     if plot:
         safe_id = str(structure_id).replace("/", "_")
         plot_interactions_bar(
@@ -590,15 +558,15 @@ def build_parser() -> argparse.ArgumentParser:
     predict_next = subparsers.add_parser("predict-next-rank", help="Predict next-inspection rank for a structure using latest available BCI year")
     predict_next.add_argument("--dataset-config", default="configs/dataset.yml")
     predict_next.add_argument("--model", default="artifacts/next_rank_model.pkl")
-    predict_next.add_argument("--id", required=True)
+    predict_next.add_argument("--id", default=None, help="structure_id (default: dataset config `structure_id.default`)")
     predict_next.add_argument("--plot", action="store_true", help="Save predicted class-probability bar plot to artifacts/reports/")
     predict_next.add_argument("--out", default=None, help="Write YAML report to this path (default: artifacts/reports/*)")
     predict_next.add_argument("--stdout", action="store_true", help="Print YAML to stdout instead of writing a file")
 
-    explain_next = subparsers.add_parser("explain-next-rank", help="Explain next-inspection rank prediction with shapiq interactions")
+    explain_next = subparsers.add_parser("explain-next-rank", help="Explain next-inspection rank prediction with a cached game table")
     explain_next.add_argument("--dataset-config", default="configs/dataset.yml")
     explain_next.add_argument("--model", default="artifacts/next_rank_model.pkl")
-    explain_next.add_argument("--id", required=True)
+    explain_next.add_argument("--id", default=None, help="structure_id (default: dataset config `structure_id.default`)")
     explain_next.add_argument("--plot", action="store_true", help="Save a simple interaction bar plot to artifacts/reports/")
     explain_next.add_argument("--synergy-config", default="configs/synergy.yml", help="Synergy/explanation config (default: configs/synergy.yml)")
     explain_next.add_argument("--out", default=None, help="Write YAML report to this path (default: artifacts/reports/*)")
@@ -607,11 +575,18 @@ def build_parser() -> argparse.ArgumentParser:
     explain = subparsers.add_parser("explain", help="Explain a single structure")
     explain.add_argument("--dataset-config", default="configs/dataset.yml")
     explain.add_argument("--model", default="artifacts/model.pkl")
-    explain.add_argument("--id", required=True)
+    explain.add_argument("--id", default=None, help="structure_id (default: dataset config `structure_id.default`)")
     explain.add_argument("--plot", action="store_true", help="Save a simple interaction bar plot to artifacts/reports/")
     explain.add_argument("--synergy-config", default="configs/synergy.yml", help="Synergy/explanation config (default: configs/synergy.yml)")
     explain.add_argument("--out", default=None, help="Write YAML report to this path (default: artifacts/reports/*)")
     explain.add_argument("--stdout", action="store_true", help="Print YAML to stdout instead of writing a file")
+
+    build_gt = subparsers.add_parser("build-game-table", help="Build a coalition->score game table by retraining with feature masks")
+    build_gt.add_argument("--dataset-config", default="configs/dataset.yml")
+    build_gt.add_argument("--task", default="next-rank", choices=["next-rank", "baseline"])
+    build_gt.add_argument("--synergy-config", default="configs/synergy.yml", help="Reads game_table.* settings from this file")
+    build_gt.add_argument("--out", default=None, help="Write to this path (.parquet or .csv; default: game_table.cache_path)")
+    build_gt.add_argument("--no-progress", action="store_true", help="Disable tqdm progress output")
 
     return parser
 
@@ -627,34 +602,56 @@ def main() -> None:
     elif args.command == "train-next-rank":
         run_train_next_rank(Path(args.dataset_config), Path(args.model_out))
     elif args.command == "predict-next-rank":
+        structure_id = resolve_structure_id(Path(args.dataset_config), getattr(args, "id", None))
         run_predict_next_rank(
             Path(args.dataset_config),
             Path(args.model),
-            str(args.id),
+            structure_id,
             plot=bool(args.plot),
             out=args.out,
             stdout=bool(args.stdout),
         )
     elif args.command == "explain-next-rank":
+        structure_id = resolve_structure_id(Path(args.dataset_config), getattr(args, "id", None))
         run_explain_next_rank(
             Path(args.dataset_config),
             Path(args.model),
-            str(args.id),
+            structure_id,
             plot=bool(args.plot),
             synergy_config=str(args.synergy_config),
             out=args.out,
             stdout=bool(args.stdout),
         )
     elif args.command == "explain":
+        structure_id = resolve_structure_id(Path(args.dataset_config), getattr(args, "id", None))
         run_explain(
             Path(args.dataset_config),
             Path(args.model),
-            str(args.id),
+            structure_id,
             plot=bool(args.plot),
             synergy_config=str(args.synergy_config),
             out=args.out,
             stdout=bool(args.stdout),
         )
+    elif args.command == "build-game-table":
+        synergy_cfg = load_yaml(Path(args.synergy_config))
+        game_cfg = (synergy_cfg.get("game_table", {}) or {}) if isinstance(synergy_cfg, dict) else {}
+        default_out = game_cfg.get("cache_path")
+        out_path = Path(args.out) if args.out else (Path(default_out) if default_out else None)
+        if out_path is None:
+            raise SystemExit("Output path is required: set game_table.cache_path in synergy config or pass --out.")
+        X, y = load_task_dataset(Path(args.dataset_config), task=str(args.task))
+        settings = GameTableSettings(
+            enabled=True,
+            max_order=int(game_cfg.get("max_order", 2)),
+            n_coalitions=int(game_cfg.get("n_coalitions", 400)),
+            test_size=float(game_cfg.get("test_size", 0.25)),
+            metric=str(game_cfg.get("metric", "accuracy")),
+            seed=int(game_cfg.get("seed", 42)),
+        )
+        table = build_game_table(X=X, y=y, players=list(X.columns), settings=settings, progress=not bool(args.no_progress))
+        save_game_table(table, out_path)
+        print(str(out_path))
 
 
 if __name__ == "__main__":

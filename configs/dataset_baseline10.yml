@@ -2,11 +2,10 @@ paths:
   raw_csv: data/raw/bridge_conditions.csv
   raw_clean_csv: data/processed/bridge_conditions_clean.csv
   data_dictionary: docs/data_dictionary_bridge_conditions.md
-  structures_parquet: data/processed/structures.parquet
-  bci_long_parquet: data/processed/bci_long.parquet
-  features_parquet: data/processed/features.parquet
-  labels_parquet: data/processed/labels.parquet
-  next_rank_dataset_parquet: data/processed/next_rank_dataset.parquet
+  structures_parquet: data/processed/baseline10/structures.parquet
+  bci_long_parquet: data/processed/baseline10/bci_long.parquet
+  features_parquet: data/processed/baseline10/features.parquet
+  labels_parquet: data/processed/baseline10/labels.parquet
 
 io:
   encoding: utf-8
@@ -47,7 +46,21 @@ filters:
 inspection_year:
   default: 2020
 
+# Reduce baseline feature space to ~10 columns (plus structure_id).
+feature_columns:
+  include:
+    - category
+    - subcategory_1
+    - type_1
+    - material_1
+    - region
+    - owner
+    - age
+    - years_since_major_rehab
+    - deck_length_m
+    - span_count
+
 # Optional default `--id` for CLI commands like `explain` / `predict-next-rank`.
-# If omitted, you must pass `--id` explicitly.
 structure_id:
   default: "01X-0018/C0"
+

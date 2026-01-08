@@ -1,53 +1,21 @@
-max_set_size: 3
-
-engine: shapiq
-
-shapiq:
-  index: k-SII
-  max_order: 2
-  budget: 600
-  background_size: 256
-  random_state: 42
-  # NOTE: When true, shapiq prints its own tqdm progress (often noisy).
-  verbose: true
-
-# Coalition universe order used for ordinal set-metrics (lex-cel / ordinal Banzhaf).
-# Keep `shapiq.max_order` small for speed (e.g. 2), but allow these metrics to
-# see supersets like size-3 coalitions so size-2 results are not degenerate.
-ordinal_metrics_max_order: 4
-
-progress:
-  enabled: true
-
-# Cached game table (coalition -> score) for ordinal metrics.
-# Built once per (structure_id, model, feature-set, config) and persisted to parquet.
-game_table:
-  enabled: true
-  n_samples: 3000
-  max_order: 4
-  seed: 42
-  cache_dir: artifacts/game_tables
-
-candidate_generation:
-  strategy: frequent_categories
-  min_support: 0.02
-  top_n_features: 12
-
-comparison:
-  rule: total_preorder
-  tie_policy: allow
-  allow_incomparability: true
-
 report:
   top_k: 5
-  include_incomparability: true
 
-borda_shapley:
+game_table:
   enabled: true
-  n_players: 10
+  task: next-rank
   max_order: 2
-  domain_max_size: 2
+  n_coalitions: 400
+  test_size: 0.25
+  metric: accuracy
+  seed: 42
+  cache_path: artifacts/game_tables/next_rank.parquet
+  auto_build: false
+
+lexcel:
+  enabled: true
   score_key: abs_value
   tie_tol: 1.0e-12
-  missing_score: 0.0
-  top_k: 20
+  min_order: 1
+  max_order: null
+  max_items: 20
