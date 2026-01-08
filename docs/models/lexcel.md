@@ -12,7 +12,7 @@
 - `coalitions`: `U ⊂ 2^N \ {∅}`（ゲームテーブルに含まれる coalition の集合族）
 - `score(S)`: coalition のスコア（既定は `abs_value`）
 
-ゲームテーブル（`coalition_key`, `order`, `value`, `abs_value`）を `U` とする。
+ゲームテーブルを `U` とする。現行の出力はワイド形式（0/1 指示変数）であり、各特徴量列の 1/0 が coalition のメンバーシップを表す（詳細: `docs/models/game_table.md`）。
 
 ## 提携ランキング（preorder）の構成
 

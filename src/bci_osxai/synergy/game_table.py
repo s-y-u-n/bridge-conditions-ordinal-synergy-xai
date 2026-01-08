@@ -136,7 +136,7 @@ def _train_and_score(
 
     value = _score_predictions(y_test, y_pred, metric=metric)
     return {
-        "coalition_key": coalition_key(cols),
+        "coalition": list(cols),
         "order": int(len(cols)),
         "value": float(value),
         "abs_value": float(abs(value)),
@@ -163,9 +163,21 @@ def build_game_table(
     rows: List[Dict[str, Any]] = []
     for coalition in tqdm_wrap(coalitions, desc="build-game-table", enabled=bool(progress)):
         rows.append(_train_and_score(X, y, coalition, settings=settings))
-    df = pd.DataFrame(rows)
-    df["seed"] = int(settings.seed)
-    return df
+    base = pd.DataFrame(rows)
+    player_cols = [str(p) for p in players]
+    out = pd.DataFrame(0, index=base.index, columns=player_cols, dtype=int)
+    for i, coalition in enumerate(base["coalition"].tolist()):
+        for p in coalition:
+            if p in out.columns:
+                out.at[i, p] = 1
+    out["order"] = base["order"].astype(int)
+    out["value"] = base["value"].astype(float)
+    out["abs_value"] = base["abs_value"].astype(float)
+    out["metric"] = base["metric"].astype(str)
+    out["n_train"] = base["n_train"].astype(int)
+    out["n_test"] = base["n_test"].astype(int)
+    out["seed"] = int(settings.seed)
+    return out
 
 
 def load_game_table(path: str | Path) -> pd.DataFrame:

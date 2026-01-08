@@ -42,16 +42,21 @@ def lexcel_ranking(
             "ranking": [],
         }
 
-    required = {"coalition_key", "order", settings.score_key}
+    required = {"order", settings.score_key}
     missing = [c for c in required if c not in interactions_table.columns]
     if missing:
         raise ValueError(f"Lex-cel requires columns {sorted(required)}; missing={missing}")
+
+    player_cols = [str(p) for p in players if str(p) in interactions_table.columns]
+    has_indicator_matrix = len(player_cols) > 0
+    has_coalition_key = "coalition_key" in interactions_table.columns
 
     df = interactions_table.copy()
     df = df[df["order"].astype(int) >= int(settings.min_order)]
     if settings.max_order is not None:
         df = df[df["order"].astype(int) <= int(settings.max_order)]
-    df = df[df["coalition_key"].notna()].copy()
+    if has_coalition_key:
+        df = df[df["coalition_key"].notna()].copy()
     if df.empty:
         return {
             "enabled": True,
@@ -80,14 +85,26 @@ def lexcel_ranking(
     df["_rank_id"] = rank_ids
 
     n_ranks = int(current_rank + 1)
-    player_set = {str(p) for p in players}
+    player_set = set(player_cols) if has_indicator_matrix else {str(p) for p in players}
     theta_by_player: Dict[str, List[int]] = {p: [0] * n_ranks for p in player_set}
 
-    for coalition_key, rank_id in zip(df["coalition_key"].tolist(), df["_rank_id"].tolist()):
-        k = int(rank_id)
-        for p in _iter_players_in_coalition_key(coalition_key):
-            if p in theta_by_player:
-                theta_by_player[p][k] += 1
+    if has_indicator_matrix:
+        for _, row in df.iterrows():
+            k = int(row["_rank_id"])
+            for p in player_cols:
+                try:
+                    if int(row[p]) == 1:
+                        theta_by_player[p][k] += 1
+                except Exception:
+                    continue
+    else:
+        if not has_coalition_key:
+            raise ValueError("Lex-cel requires either indicator player columns or `coalition_key`.")
+        for coalition_key, rank_id in zip(df["coalition_key"].tolist(), df["_rank_id"].tolist()):
+            k = int(rank_id)
+            for p in _iter_players_in_coalition_key(coalition_key):
+                if p in theta_by_player:
+                    theta_by_player[p][k] += 1
 
     def theta_key(p: str) -> tuple:
         return tuple(theta_by_player.get(p, [0] * n_ranks))
@@ -125,4 +142,3 @@ def lexcel_ranking(
         "n_ranks": int(n_ranks),
         "ranking": ranking,
     }
-

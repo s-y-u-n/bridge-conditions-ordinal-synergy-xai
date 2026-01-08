@@ -48,7 +48,14 @@ def resolve_structure_id(dataset_config: Path, structure_id: str | None) -> str:
     return str(default_id)
 
 
-def top_sets_from_interactions_table(table: pd.DataFrame, *, top_k: int, min_order: int, max_order: int) -> list[dict[str, object]]:
+def top_sets_from_interactions_table(
+    table: pd.DataFrame,
+    *,
+    players: list[str] | None = None,
+    top_k: int,
+    min_order: int,
+    max_order: int,
+) -> list[dict[str, object]]:
     results: list[dict[str, object]] = []
     if table is None or table.empty:
         return results
@@ -57,7 +64,13 @@ def top_sets_from_interactions_table(table: pd.DataFrame, *, top_k: int, min_ord
         return results
     filtered = filtered.sort_values("abs_value", ascending=False).head(int(top_k))
     for _, row in filtered.iterrows():
-        feat = [x for x in str(row["coalition_key"]).split("|") if x]
+        if "coalition_key" in filtered.columns:
+            feat = [x for x in str(row["coalition_key"]).split("|") if x]
+        else:
+            if players is None:
+                meta = {"order", "value", "abs_value", "metric", "n_train", "n_test", "seed"}
+                players = [c for c in filtered.columns if c not in meta]
+            feat = [p for p in players if p in filtered.columns and int(row.get(p, 0) or 0) == 1]
         results.append(
             {
                 "set": feat,
@@ -437,7 +450,7 @@ def run_explain_next_rank(
     # Treat game_table as a coalition preorder table.
     # Keep the report shape compatible with earlier outputs.
     max_order = int(pd.to_numeric(game_table["order"], errors="coerce").max()) if not game_table.empty else 2
-    top_sets = top_sets_from_interactions_table(table=game_table, top_k=top_k, min_order=2, max_order=max_order)
+    top_sets = top_sets_from_interactions_table(table=game_table, players=list(X_model.columns), top_k=top_k, min_order=2, max_order=max_order)
 
     lex_cfg = (synergy_cfg.get("lexcel", {}) or {}) if isinstance(synergy_cfg, dict) else {}
     lex_enabled = bool(lex_cfg.get("enabled", False))
@@ -506,7 +519,7 @@ def run_explain(
         top_k = int(synergy_cfg.get("report", {}).get("top_k", 5))
         game_table = build_or_load_game_table(dataset_config, Path(synergy_config))
         max_order = int(pd.to_numeric(game_table["order"], errors="coerce").max()) if not game_table.empty else 2
-        top_sets = top_sets_from_interactions_table(table=game_table, top_k=top_k, min_order=2, max_order=max_order)
+        top_sets = top_sets_from_interactions_table(table=game_table, players=list(X.columns), top_k=top_k, min_order=2, max_order=max_order)
 
         lex_cfg = (synergy_cfg.get("lexcel", {}) or {}) if isinstance(synergy_cfg, dict) else {}
         lex_enabled = bool(lex_cfg.get("enabled", False))

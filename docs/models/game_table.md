@@ -22,13 +22,23 @@ shapiq の内部サンプリングに依存せず、特徴集合（coalition）�
 
 列:
 
-- `coalition_key`: `"f1|f2|..."`（辞書順にソートして結合）
-- `order`: `|S|`
+### ワイド形式（0/1 指示変数; 現行の出力）
+
+プレイヤー（特徴量）ごとに 0/1 の列を持つ。
+
+- `<feature_name>`: その coalition に当該特徴量が含まれるなら `1`、含まれないなら `0`
+- `order`: `|S|`（= 0/1 列の合計）
 - `value`: `v(S)`（Lex-cel/Shapley が参照する値）
 - `abs_value`: `abs(value)`（ランキング用途）
-- `metric`: スコア名（例: `accuracy`, `neg_mae`）
+- `metric`: スコア名（分類: `accuracy`、回帰: `neg_mae`）
 - `n_train`, `n_test`: 分割サイズ
 - `seed`: 乱数シード
+
+この形式は CSV での目視や、外部ツールでの集計に向く。
+
+### 参考（キー形式）
+
+必要であれば `"f1|f2|..."` のような `coalition_key`（文字列）を併記する方式もあるが、現行実装は出力しない（ワイド形式のみ）。
 
 ## coalition の生成
 
