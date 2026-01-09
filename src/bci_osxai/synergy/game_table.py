@@ -16,7 +16,7 @@ class GameTableSettings:
     max_order: int = 2
     n_coalitions: int = 400
     test_size: float = 0.25
-    metric: str = "accuracy"  # "accuracy" | "neg_mae"
+    metric: str = "accuracy"  # "accuracy" | "neg_mae" | "inv_mae"
     seed: int = 42
 
 
@@ -66,6 +66,11 @@ def _score_predictions(y_true: pd.Series, y_pred: np.ndarray, *, metric: str) ->
         from sklearn.metrics import mean_absolute_error  # noqa: PLC0415
 
         return -float(mean_absolute_error(y_true.astype(float), np.asarray(y_pred, dtype=float)))
+    if metric == "inv_mae":
+        from sklearn.metrics import mean_absolute_error  # noqa: PLC0415
+
+        mae = float(mean_absolute_error(y_true.astype(float), np.asarray(y_pred, dtype=float)))
+        return 1.0 / (1.0 + mae)
     raise ValueError(f"Unsupported metric: {metric}")
 
 
@@ -96,8 +101,8 @@ def _train_and_score(
     stratify = None
     is_regression = pd.api.types.is_numeric_dtype(y_clean)
     if is_regression:
-        if settings.metric != "neg_mae":
-            raise ValueError("Regression game table currently supports metric=neg_mae only.")
+        if str(settings.metric) not in {"neg_mae", "inv_mae"}:
+            raise ValueError("Regression game table currently supports metric in {neg_mae, inv_mae} only.")
     else:
         if settings.metric != "accuracy":
             raise ValueError("Classification game table currently supports metric=accuracy only.")
@@ -128,7 +133,7 @@ def _train_and_score(
     if is_regression:
         model = train_xgb_regressor(X_train, y_train)
         y_pred = model.predict(X_test)
-        metric = "neg_mae"
+        metric = str(settings.metric)
     else:
         model = train_xgb_classifier(X_train, y_train)
         y_pred = model.predict(X_test)
@@ -189,9 +194,8 @@ def load_game_table(path: str | Path) -> pd.DataFrame:
 
 def save_game_table(df: pd.DataFrame, path: str | Path) -> Path:
     path = Path(path)
+    if path.suffix.lower() != ".csv":
+        path = path.with_suffix(".csv")
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.suffix.lower() == ".csv":
-        df.to_csv(path, index=False)
-    else:
-        df.to_parquet(path, index=False)
+    df.to_csv(path, index=False)
     return path

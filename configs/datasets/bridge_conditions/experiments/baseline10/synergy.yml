@@ -1,0 +1,22 @@
+report:
+  top_k: 5
+
+game_table:
+  enabled: true
+  task: baseline
+  max_order: 10
+  n_coalitions: 1023
+  test_size: 0.25
+  metric: accuracy
+  seed: 42
+  cache_path: artifacts/bridge_conditions/game_tables/baseline10.csv
+  auto_build: false
+
+lexcel:
+  enabled: true
+  score_key: abs_value
+  tie_tol: 1.0e-12
+  min_order: 1
+  max_order: null
+  max_items: 20
+

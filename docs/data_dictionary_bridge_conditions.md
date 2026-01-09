@@ -5,7 +5,7 @@
 ## 1. 概要
 
 - 本ファイルは Ontario “Bridge conditions” CSV の列定義（データ辞書）です。
-- `configs/dataset.yml` では、このCSVの列名をキーとして前処理・特徴量作成に利用します。
+- `configs/datasets/bridge_conditions/dataset.yml` では、このCSVの列名をキーとして前処理・特徴量作成に利用します。
 - `_id` は行番号（連番）で、公開されているデータ辞書には載っていない補助列です（本リポジトリでは入力に含まれているため列として扱います）。
 
 ## 2. 列定義
@@ -44,4 +44,3 @@
 - Variable Label: `BCI in Year {YYYY}`
 - Variable Definition: `BCI (Bridge Condition Index) ... 0 to 100, the higher the number, the better the overall condition.`
 - Data Type: Decimal
-

@@ -1,0 +1,12 @@
+paths:
+  raw_csv: data/raw/dataset_31_credit-g.arff
+  structures_parquet: data/processed/credit_g/structures.parquet
+  features_parquet: data/processed/credit_g/features.parquet
+  labels_parquet: data/processed/credit_g/labels.parquet
+
+io:
+  format: arff
+
+columns:
+  target: class
+

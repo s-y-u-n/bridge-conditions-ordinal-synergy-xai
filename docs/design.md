@@ -179,18 +179,38 @@ BCIは0–100の連続値なので、管理判断に合わせて段階化する�
 
 ## 8. リポジトリ構成案（Python, Poetry前提）
 
+### 8.1 方針（複数データセット対応）
+
+橋梁以外のデータセットでも同じ流れ（クレンジング→特徴量絞り込み→特徴マスクで学習/評価→ゲームテーブル作成）を回すため、
+設定ファイルは **データセット単位**でまとめ、実験ごとの差分は `experiments/` 配下で管理する。
+
+- すべての「成果物（artifacts）」は `artifacts/<dataset_id>/...` に集約する
+- ゲームテーブルは **常に CSV** で保存する（外部ツールで扱いやすくする）
+- 学習済みモデルも `artifacts/<dataset_id>/models/` に保存する（再現性・再利用のため）
+
+`dataset_id` は `bridge_conditions` のような識別子で、別データセット追加時はフォルダを増やすだけでよい。
+
+### 8.2 ディレクトリ（推奨）
+
 ```
 bridge-conditions-ordinal-synergy-xai/
   README.md
   pyproject.toml
   data/
-    raw/               # 原本CSV（git管理しない）
-    processed/
+    raw/                               # 原本CSV（git管理しない）
+    processed/<dataset_id>/            # 中間テーブル（データセット単位）
   configs/
-    dataset.yml        # 列名、型、パス
-    labeling.yml       # BCI→ordinal閾値
-    model.yml          # 学習設定
-    synergy.yml        # 集合サイズ、候補生成、比較規則
+    datasets/
+      <dataset_id>/
+        dataset.yml                    # 入出力パス、列名、クレンジング/前処理設定
+        labeling.yml                   # ターゲット定義（連続/序数/ランク等）
+        model.yml                      # 学習設定
+        synergy.yml                    # ゲームテーブル/説明設定
+        experiments/
+          <experiment_id>/
+            dataset.yml                # 特徴量絞り込み等の差分（任意）
+            labeling.yml               # ラベル差分（任意）
+            synergy.yml                # ゲームテーブル差分（任意）
   src/
     bci_osxai/
       __init__.py
@@ -215,10 +235,32 @@ bridge-conditions-ordinal-synergy-xai/
         report.py
       cli/
         main.py
+  artifacts/
+    <dataset_id>/
+      game_tables/                     # 常に .csv
+      reports/
+      models/
   notebooks/
   tests/
   .gitignore
 ```
+
+### 8.3 設定ファイルの責務（要点）
+
+- `dataset.yml`: 生データの場所、クレンジング設定、特徴量（列）選択、出力先（processed）を定義
+- `labeling.yml`: 目的変数（回帰/分類/序数/ランク）を定義
+- `synergy.yml`: ゲームテーブル作成設定（`metric` など）と説明（Lex-cel 等）設定を定義
+
+**ゲームテーブル `value` は常に「大きいほど良い」スコア**とし、回帰系は `inv_mae=1/(1+MAE)` のように 0〜1 へ正規化した指標を使う。
+
+### 8.4 入力フォーマット（CSV / ARFF）
+
+tabular データセット追加を容易にするため、`io.format` で入力フォーマットを切り替える。
+
+- `io.format: csv`（デフォルト）
+- `io.format: arff`（例: `data/raw/dataset_31_credit-g.arff`）
+
+ARFF は nominal 値が bytes で返る場合があるため、前処理で文字列へ正規化し、`?` は欠損として扱う。
 
 CLI（最小）
 

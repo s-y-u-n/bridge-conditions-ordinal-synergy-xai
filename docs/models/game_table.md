@@ -16,9 +16,9 @@ shapiq の内部サンプリングに依存せず、特徴集合（coalition）�
 2. `X_S := X[S]` を作り、`X_S` のみでモデルを学習
 3. `test` 上で予測し、指定のメトリクスでスコア `v(S)` を算出
 
-## 出力（parquet / csv）
+## 出力（CSV固定）
 
-`artifacts/game_tables/*.parquet`（または `.csv`）に保存する。
+`artifacts/**/game_tables/*.csv` に保存する（常にCSV）。
 
 列:
 
@@ -30,7 +30,7 @@ shapiq の内部サンプリングに依存せず、特徴集合（coalition）�
 - `order`: `|S|`（= 0/1 列の合計）
 - `value`: `v(S)`（Lex-cel/Shapley が参照する値）
 - `abs_value`: `abs(value)`（ランキング用途）
-- `metric`: スコア名（分類: `accuracy`、回帰: `neg_mae`）
+- `metric`: スコア名（分類: `accuracy`、回帰: `neg_mae`（=-MAE）, `inv_mae`（=1/(1+MAE) で 0〜1））
 - `n_train`, `n_test`: 分割サイズ
 - `seed`: 乱数シード
 
@@ -49,7 +49,7 @@ shapiq の内部サンプリングに依存せず、特徴集合（coalition）�
 
 ## CLI
 
-`bci-xai build-game-table` で作成する（`--out` の拡張子で `.parquet` / `.csv` を切り替える）。
+`bci-xai build-game-table` で作成する（ゲームテーブルは常に `.csv`）。
 
 - `--task baseline|next-rank` で対象データを選択
 - `--synergy-config` の `game_table.*` を参照して設定する

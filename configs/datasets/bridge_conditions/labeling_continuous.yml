@@ -8,3 +8,4 @@ target:
 schemes:
   CONTINUOUS_BCI:
     type: continuous_bci
+

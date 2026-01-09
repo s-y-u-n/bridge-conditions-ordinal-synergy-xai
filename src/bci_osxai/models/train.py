@@ -58,10 +58,22 @@ def train_xgb_classifier(features: pd.DataFrame, labels: pd.Series) -> EncodedCl
 
     y = labels.astype("object").fillna(pd.NA)
     classes = sorted([str(c) for c in pd.unique(y.dropna())])
+    if not classes:
+        raise ValueError("No non-null classes found in labels.")
     class_to_idx = {c: i for i, c in enumerate(classes)}
     y_idx = y.map(class_to_idx).astype(int)
 
     preprocessor = _build_preprocessor(features)
+    n_classes = int(len(classes))
+    if n_classes <= 2:
+        objective = "binary:logistic"
+        eval_metric = "logloss"
+        extra = {}
+    else:
+        objective = "multi:softprob"
+        eval_metric = "mlogloss"
+        extra = {"num_class": n_classes}
+
     model = XGBClassifier(
         n_estimators=400,
         learning_rate=0.05,
@@ -69,11 +81,12 @@ def train_xgb_classifier(features: pd.DataFrame, labels: pd.Series) -> EncodedCl
         subsample=0.9,
         colsample_bytree=0.9,
         reg_lambda=1.0,
-        objective="multi:softprob",
-        eval_metric="mlogloss",
+        objective=objective,
+        eval_metric=eval_metric,
         tree_method="hist",
         random_state=42,
         n_jobs=0,
+        **extra,
     )
     pipeline = Pipeline([("preprocess", preprocessor), ("model", model)])
     pipeline.fit(features, y_idx)
@@ -106,4 +119,3 @@ def save_model(model: Any, path: str | Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as handle:
         pickle.dump(model, handle)
-

@@ -1,0 +1,22 @@
+report:
+  top_k: 5
+
+game_table:
+  enabled: true
+  task: next-rank
+  max_order: 2
+  n_coalitions: 400
+  test_size: 0.25
+  metric: accuracy
+  seed: 42
+  cache_path: artifacts/bridge_conditions/game_tables/next_rank_fast.csv
+  auto_build: false
+
+lexcel:
+  enabled: true
+  score_key: abs_value
+  tie_tol: 1.0e-12
+  min_order: 1
+  max_order: null
+  max_items: 20
+

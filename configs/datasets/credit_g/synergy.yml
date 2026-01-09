@@ -3,13 +3,13 @@ report:
 
 game_table:
   enabled: true
-  task: next-rank
-  max_order: 2
+  task: baseline
+  max_order: 6
   n_coalitions: 400
   test_size: 0.25
   metric: accuracy
   seed: 42
-  cache_path: artifacts/game_tables/next_rank.parquet
+  cache_path: artifacts/credit_g/game_tables/game_table.csv
   auto_build: false
 
 lexcel:
@@ -19,3 +19,4 @@ lexcel:
   min_order: 1
   max_order: null
   max_items: 20
+

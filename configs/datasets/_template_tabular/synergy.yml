@@ -4,12 +4,12 @@ report:
 game_table:
   enabled: true
   task: baseline
-  max_order: 10
-  n_coalitions: 1023
+  max_order: 5
+  n_coalitions: 200
   test_size: 0.25
-  metric: accuracy
+  metric: inv_mae
   seed: 42
-  cache_path: artifacts/game_tables/baseline10.parquet
+  cache_path: artifacts/<dataset_id>/game_tables/game_table.csv
   auto_build: false
 
 lexcel:

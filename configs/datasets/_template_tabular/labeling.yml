@@ -1,0 +1,11 @@
+# Template: regression
+active_scheme: CONTINUOUS
+
+target:
+  source: column
+  column: target
+
+schemes:
+  CONTINUOUS:
+    type: continuous_bci
+

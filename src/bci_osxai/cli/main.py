@@ -9,12 +9,12 @@ import pandas as pd
 import yaml
 
 from bci_osxai.features.build_features import build_features
-from bci_osxai.io.load_raw import load_raw_csv
+from bci_osxai.io.load_raw import load_raw_arff, load_raw_csv
+from bci_osxai.labels.make_column_labels import make_column_labels
 from bci_osxai.labels.make_continuous_targets import make_continuous_targets
 from bci_osxai.labels.make_ordinal_labels import make_ordinal_labels
 from bci_osxai.labels.make_rehab_floor_rank_labels import RehabFloorRankConfig, make_rehab_floor_rank_labels
 from bci_osxai.models.predict import load_model, predict
-from bci_osxai.models.train import save_model, train_xgb_classifier, train_xgb_regressor
 from bci_osxai.preprocess.clean_raw_csv import clean_multiline_csv, load_rename_map_from_data_dictionary
 from bci_osxai.preprocess.build_next_rank_dataset import (
     NextRankConfig,
@@ -26,6 +26,7 @@ from bci_osxai.preprocess.reshape_bci import build_bci_long
 from bci_osxai.synergy.report import build_synergy_report
 from bci_osxai.synergy.game_table import GameTableSettings, build_game_table, load_game_table, save_game_table
 from bci_osxai.synergy.lexcel import LexcelSettings, lexcel_ranking
+from bci_osxai.synergy.power_indices import game_from_table, get_power_index, save_table
 from bci_osxai.synergy.visualize import (
     plot_interactions_bar,
 )
@@ -127,12 +128,17 @@ def build_or_load_game_table(dataset_config: Path, synergy_config: Path) -> pd.D
     if not cache_path:
         raise SystemExit("game_table.cache_path is required in synergy config.")
 
-    cache_file = Path(str(cache_path))
-    if cache_file.exists():
-        return load_game_table(cache_file)
+    cache_file_raw = Path(str(cache_path))
+    cache_file_csv = cache_file_raw if cache_file_raw.suffix.lower() == ".csv" else cache_file_raw.with_suffix(".csv")
+    if cache_file_csv.exists():
+        return load_game_table(cache_file_csv)
+    if cache_file_raw.exists():
+        return load_game_table(cache_file_raw)
 
     if not bool(game_cfg.get("auto_build", False)):
-        raise SystemExit(f"game table not found: {cache_file} (run `bci-xai build-game-table` or set game_table.auto_build: true)")
+        raise SystemExit(
+            f"game table not found: {cache_file_csv} (run `bci-xai build-game-table` or set game_table.auto_build: true)"
+        )
 
     X, y = load_task_dataset(dataset_config, task=str(game_cfg.get("task", "next-rank")))
     settings = GameTableSettings(
@@ -144,7 +150,7 @@ def build_or_load_game_table(dataset_config: Path, synergy_config: Path) -> pd.D
         seed=int(game_cfg.get("seed", 42)),
     )
     table = build_game_table(X=X, y=y, players=list(X.columns), settings=settings)
-    save_game_table(table, cache_file)
+    save_game_table(table, cache_file_csv)
     return table
 
 
@@ -165,25 +171,33 @@ def run_preprocess(dataset_config: Path, labeling_config: Path) -> None:
     labeling_cfg = load_yaml(labeling_config)
 
     paths = dataset_cfg["paths"]
-    columns = dataset_cfg["columns"]
+    columns = (dataset_cfg.get("columns") or {}) if isinstance(dataset_cfg, dict) else {}
     encoding = dataset_cfg.get("io", {}).get("encoding")
     rename_columns = bool(dataset_cfg.get("io", {}).get("rename_columns", False))
+    io_format = str((dataset_cfg.get("io") or {}).get("format") or "csv").strip().lower()
 
-    raw_csv = paths["raw_csv"]
+    raw_path = paths.get("raw_csv") or paths.get("raw_path")
+    if not raw_path:
+        raise SystemExit("dataset.paths.raw_csv (or raw_path) is required.")
     clean_csv = paths.get("raw_clean_csv")
-    if clean_csv:
+    if io_format == "csv" and clean_csv:
         rename_map = None
         if rename_columns:
-            year_cfg = dataset_cfg.get("bci_years", {})
+            year_cfg = dataset_cfg.get("bci_years", {}) or {}
             rename_map = load_rename_map_from_data_dictionary(
                 paths.get("data_dictionary", "docs/data_dictionary_bridge_conditions.md"),
                 year_start=int(year_cfg.get("start", 2000)),
                 year_end=int(year_cfg.get("end", 2020)),
             )
-        clean_multiline_csv(raw_csv, clean_csv, encoding=encoding or "utf-8", rename_map=rename_map)
-        raw_csv = clean_csv
+        clean_multiline_csv(raw_path, clean_csv, encoding=encoding or "utf-8", rename_map=rename_map)
+        raw_path = clean_csv
 
-    df = load_raw_csv(raw_csv, encoding=encoding)
+    if io_format == "arff":
+        df = load_raw_arff(raw_path)
+    elif io_format == "csv":
+        df = load_raw_csv(raw_path, encoding=encoding)
+    else:
+        raise SystemExit(f"Unsupported io.format: {io_format!r} (expected: csv|arff)")
     df = normalize_column_whitespace(df)
 
     filters = dataset_cfg.get("filters", {})
@@ -192,16 +206,38 @@ def run_preprocess(dataset_config: Path, labeling_config: Path) -> None:
         if column_name and column_name in df.columns:
             df = df[df[column_name] == value]
 
-    year_cfg = dataset_cfg.get("bci_years", {})
-    start = int(year_cfg.get("start", 2000))
-    end = int(year_cfg.get("end", 2020))
-    col_format = str(year_cfg.get("col_format", "{year}"))
-    year_cols = [col_format.format(year=year) for year in range(start, end + 1)]
+    id_source = columns.get("id")
+    if id_source is not None and str(id_source).strip() != "" and str(id_source) in df.columns:
+        df = df.copy()
+        df["structure_id"] = df[str(id_source)].astype(str)
+    else:
+        df = df.copy()
+        df["structure_id"] = pd.Series(range(1, len(df) + 1), dtype="int64").astype(str)
 
-    bci_long = build_bci_long(df, columns["id"], year_cols, columns["current_bci"])
+    is_bridge_conditions = bool(dataset_cfg.get("bci_years")) and bool(columns.get("current_bci"))
+    bci_long = None
+    year_cols: list[str] = []
+    if is_bridge_conditions:
+        year_cfg = dataset_cfg.get("bci_years", {}) or {}
+        start = int(year_cfg.get("start", 2000))
+        end = int(year_cfg.get("end", 2020))
+        col_format = str(year_cfg.get("col_format", "{year}"))
+        year_cols = [col_format.format(year=year) for year in range(start, end + 1)]
+        bci_long = build_bci_long(df, "structure_id", year_cols, str(columns["current_bci"]))
 
     inspection_year = dataset_cfg.get("inspection_year", {}).get("default")
-    features = build_features(df, columns, inspection_year=inspection_year)
+    if is_bridge_conditions:
+        features = build_features(df, columns, inspection_year=inspection_year)
+    else:
+        target_fallback = columns.get("target")
+        target_cfg = labeling_cfg.get("target", {}) or {}
+        target_col = target_cfg.get("column") or target_fallback
+        if target_col and str(target_col) in df.columns:
+            drop = {"structure_id", str(target_col)}
+        else:
+            drop = {"structure_id"}
+        features = df.drop(columns=[c for c in drop if c in df.columns], errors="ignore").copy()
+        features.insert(0, "structure_id", df["structure_id"].astype(str))
     include = (dataset_cfg.get("feature_columns") or {}).get("include")
     if include:
         include_set = {str(c) for c in include}
@@ -213,12 +249,21 @@ def run_preprocess(dataset_config: Path, labeling_config: Path) -> None:
     scheme_type = scheme_cfg.get("type", "fixed_thresholds")
     target_cfg = labeling_cfg.get("target", {})
     if target_cfg.get("source") == "year":
-        bci_col = year_cfg.get("col_format", "{year}").format(year=int(target_cfg.get("year")))
+        if not is_bridge_conditions:
+            raise SystemExit("target.source=year is only supported for bridge_conditions-style datasets.")
+        year_cfg = dataset_cfg.get("bci_years", {}) or {}
+        bci_col = str(year_cfg.get("col_format", "{year}")).format(year=int(target_cfg.get("year")))
+    elif target_cfg.get("source") == "column":
+        bci_col = str(target_cfg.get("column"))
     else:
-        bci_col = target_cfg.get("column", columns["current_bci"])
+        if columns.get("current_bci") is None:
+            raise SystemExit("labeling.target.column is required for non-bridge datasets (set target.source: column).")
+        bci_col = str(target_cfg.get("column", columns["current_bci"]))
 
     if scheme_type == "continuous_bci":
-        labels = make_continuous_targets(df, id_col=columns["id"], bci_col=bci_col)
+        labels = make_continuous_targets(df, id_col="structure_id", bci_col=bci_col)
+    elif scheme_type == "column":
+        labels = make_column_labels(df, id_col="structure_id", target_col=bci_col)
     elif scheme_type == "rehab_floor_ranks":
         dist = scheme_cfg.get("distribution", {}) or {}
         config = RehabFloorRankConfig(
@@ -231,18 +276,20 @@ def run_preprocess(dataset_config: Path, labeling_config: Path) -> None:
         )
         labels = make_rehab_floor_rank_labels(
             df,
-            id_col=columns["id"],
+            id_col="structure_id",
             target_bci_col=bci_col,
             bci_year_cols=year_cols,
             config=config,
         )
     else:
         thresholds = scheme_cfg["labels"]
-        labels = make_ordinal_labels(df, columns["id"], bci_col, thresholds)
+        labels = make_ordinal_labels(df, "structure_id", bci_col, thresholds)
 
     # Optional: build next-inspection rank dataset when a rank scheme is active.
     next_rank_path = paths.get("next_rank_dataset_parquet")
     if next_rank_path and scheme_type == "rehab_floor_ranks":
+        if bci_long is None:
+            raise SystemExit("rehab_floor_ranks requires bci_long to be available.")
         dist = scheme_cfg.get("distribution", {}) or {}
         next_cfg = NextRankConfig(
             n_ranks=int(scheme_cfg.get("n_ranks", 5)),
@@ -256,14 +303,23 @@ def run_preprocess(dataset_config: Path, labeling_config: Path) -> None:
         Path(next_rank_path).parent.mkdir(parents=True, exist_ok=True)
         next_dataset.to_parquet(next_rank_path, index=False)
 
-    Path(paths["structures_parquet"]).parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(paths["structures_parquet"], index=False)
-    bci_long.to_parquet(paths["bci_long_parquet"], index=False)
-    features.to_parquet(paths["features_parquet"], index=False)
-    labels.to_parquet(paths["labels_parquet"], index=False)
+    if paths.get("structures_parquet"):
+        Path(paths["structures_parquet"]).parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(paths["structures_parquet"], index=False)
+    if bci_long is not None and paths.get("bci_long_parquet"):
+        Path(paths["bci_long_parquet"]).parent.mkdir(parents=True, exist_ok=True)
+        bci_long.to_parquet(paths["bci_long_parquet"], index=False)
+    if paths.get("features_parquet"):
+        Path(paths["features_parquet"]).parent.mkdir(parents=True, exist_ok=True)
+        features.to_parquet(paths["features_parquet"], index=False)
+    if paths.get("labels_parquet"):
+        Path(paths["labels_parquet"]).parent.mkdir(parents=True, exist_ok=True)
+        labels.to_parquet(paths["labels_parquet"], index=False)
 
 
 def run_train(dataset_config: Path, model_out: Path) -> None:
+    from bci_osxai.models.train import save_model, train_xgb_classifier, train_xgb_regressor  # noqa: PLC0415
+
     dataset_cfg = load_yaml(dataset_config)
     paths = dataset_cfg["paths"]
 
@@ -283,6 +339,8 @@ def run_train(dataset_config: Path, model_out: Path) -> None:
 
 
 def run_train_next_rank(dataset_config: Path, model_out: Path) -> None:
+    from bci_osxai.models.train import save_model, train_xgb_classifier  # noqa: PLC0415
+
     dataset_cfg = load_yaml(dataset_config)
     paths = dataset_cfg["paths"]
     next_path = paths.get("next_rank_dataset_parquet")
@@ -349,7 +407,14 @@ def run_predict_next_rank(
     structures = pd.read_parquet(paths["structures_parquet"])
     bci_long = pd.read_parquet(paths["bci_long_parquet"])
 
-    labeling_cfg = load_yaml("configs/labeling_rank5.yml") if Path("configs/labeling_rank5.yml").exists() else load_yaml("configs/labeling.yml")
+    if Path("configs/datasets/bridge_conditions/labeling_rank5.yml").exists():
+        labeling_cfg = load_yaml("configs/datasets/bridge_conditions/labeling_rank5.yml")
+    elif Path("configs/labeling_rank5.yml").exists():
+        labeling_cfg = load_yaml("configs/labeling_rank5.yml")
+    elif Path("configs/datasets/bridge_conditions/labeling.yml").exists():
+        labeling_cfg = load_yaml("configs/datasets/bridge_conditions/labeling.yml")
+    else:
+        labeling_cfg = load_yaml("configs/labeling.yml")
     scheme = labeling_cfg["active_scheme"]
     scheme_cfg = labeling_cfg["schemes"][scheme]
     if scheme_cfg.get("type") != "rehab_floor_ranks":
@@ -552,24 +617,59 @@ def run_explain(
     write_report(report, out, stdout)
 
 
+def run_power_index(
+    game_table_path: Path,
+    *,
+    index: str,
+    out: str | Path | None,
+    stdout: bool,
+    value_col: str,
+    v_empty: float,
+) -> None:
+    table = load_game_table(game_table_path)
+    game = game_from_table(table, value_col=str(value_col), v_empty=float(v_empty), strict=True)
+    power_index = get_power_index(index)
+    result = power_index.compute(game)
+
+    if stdout:
+        print(result.to_csv(index=False))
+        return
+
+    if out is None:
+        suffix = str(power_index.name).lower()
+        out = game_table_path.with_name(f"{game_table_path.stem}_{suffix}.csv")
+    out_path = save_table(result, out)
+    print(str(out_path))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bci-xai")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    default_dataset_cfg = "configs/datasets/bridge_conditions/dataset.yml"
+    default_labeling_cfg = "configs/datasets/bridge_conditions/labeling.yml"
+    default_synergy_cfg = "configs/datasets/bridge_conditions/synergy.yml"
+    if not Path(default_dataset_cfg).exists():
+        default_dataset_cfg = "configs/dataset.yml"
+    if not Path(default_labeling_cfg).exists():
+        default_labeling_cfg = "configs/labeling.yml"
+    if not Path(default_synergy_cfg).exists():
+        default_synergy_cfg = "configs/synergy.yml"
+
     preprocess = subparsers.add_parser("preprocess", help="Run preprocessing pipeline")
-    preprocess.add_argument("--dataset-config", default="configs/dataset.yml")
-    preprocess.add_argument("--labeling-config", default="configs/labeling.yml")
+    preprocess.add_argument("--dataset-config", default=default_dataset_cfg)
+    preprocess.add_argument("--labeling-config", default=default_labeling_cfg)
 
     train = subparsers.add_parser("train", help="Train baseline model")
-    train.add_argument("--dataset-config", default="configs/dataset.yml")
+    train.add_argument("--dataset-config", default=default_dataset_cfg)
     train.add_argument("--model-out", default="artifacts/model.pkl")
 
     train_next = subparsers.add_parser("train-next-rank", help="Train next-inspection rank model (from next_rank_dataset.parquet)")
-    train_next.add_argument("--dataset-config", default="configs/dataset.yml")
+    train_next.add_argument("--dataset-config", default=default_dataset_cfg)
     train_next.add_argument("--model-out", default="artifacts/next_rank_model.pkl")
 
     predict_next = subparsers.add_parser("predict-next-rank", help="Predict next-inspection rank for a structure using latest available BCI year")
-    predict_next.add_argument("--dataset-config", default="configs/dataset.yml")
+    predict_next.add_argument("--dataset-config", default=default_dataset_cfg)
     predict_next.add_argument("--model", default="artifacts/next_rank_model.pkl")
     predict_next.add_argument("--id", default=None, help="structure_id (default: dataset config `structure_id.default`)")
     predict_next.add_argument("--plot", action="store_true", help="Save predicted class-probability bar plot to artifacts/reports/")
@@ -577,29 +677,37 @@ def build_parser() -> argparse.ArgumentParser:
     predict_next.add_argument("--stdout", action="store_true", help="Print YAML to stdout instead of writing a file")
 
     explain_next = subparsers.add_parser("explain-next-rank", help="Explain next-inspection rank prediction with a cached game table")
-    explain_next.add_argument("--dataset-config", default="configs/dataset.yml")
+    explain_next.add_argument("--dataset-config", default=default_dataset_cfg)
     explain_next.add_argument("--model", default="artifacts/next_rank_model.pkl")
     explain_next.add_argument("--id", default=None, help="structure_id (default: dataset config `structure_id.default`)")
     explain_next.add_argument("--plot", action="store_true", help="Save a simple interaction bar plot to artifacts/reports/")
-    explain_next.add_argument("--synergy-config", default="configs/synergy.yml", help="Synergy/explanation config (default: configs/synergy.yml)")
+    explain_next.add_argument("--synergy-config", default=default_synergy_cfg, help="Synergy/explanation config")
     explain_next.add_argument("--out", default=None, help="Write YAML report to this path (default: artifacts/reports/*)")
     explain_next.add_argument("--stdout", action="store_true", help="Print YAML to stdout instead of writing a file")
 
     explain = subparsers.add_parser("explain", help="Explain a single structure")
-    explain.add_argument("--dataset-config", default="configs/dataset.yml")
+    explain.add_argument("--dataset-config", default=default_dataset_cfg)
     explain.add_argument("--model", default="artifacts/model.pkl")
     explain.add_argument("--id", default=None, help="structure_id (default: dataset config `structure_id.default`)")
     explain.add_argument("--plot", action="store_true", help="Save a simple interaction bar plot to artifacts/reports/")
-    explain.add_argument("--synergy-config", default="configs/synergy.yml", help="Synergy/explanation config (default: configs/synergy.yml)")
+    explain.add_argument("--synergy-config", default=default_synergy_cfg, help="Synergy/explanation config")
     explain.add_argument("--out", default=None, help="Write YAML report to this path (default: artifacts/reports/*)")
     explain.add_argument("--stdout", action="store_true", help="Print YAML to stdout instead of writing a file")
 
     build_gt = subparsers.add_parser("build-game-table", help="Build a coalition->score game table by retraining with feature masks")
-    build_gt.add_argument("--dataset-config", default="configs/dataset.yml")
+    build_gt.add_argument("--dataset-config", default=default_dataset_cfg)
     build_gt.add_argument("--task", default="next-rank", choices=["next-rank", "baseline"])
-    build_gt.add_argument("--synergy-config", default="configs/synergy.yml", help="Reads game_table.* settings from this file")
-    build_gt.add_argument("--out", default=None, help="Write to this path (.parquet or .csv; default: game_table.cache_path)")
+    build_gt.add_argument("--synergy-config", default=default_synergy_cfg, help="Reads game_table.* settings from this file")
+    build_gt.add_argument("--out", default=None, help="Write to this path (.csv; default: game_table.cache_path)")
     build_gt.add_argument("--no-progress", action="store_true", help="Disable tqdm progress output")
+
+    power_index = subparsers.add_parser("power-index", help="Compute feature contributions (power indices) from a game table")
+    power_index.add_argument("--game-table", required=True, help="Path to game table (.csv or .parquet)")
+    power_index.add_argument("--index", default="shapley", choices=["shapley", "banzhaf"])
+    power_index.add_argument("--value-col", default="value", help="Column name holding v(S)")
+    power_index.add_argument("--v-empty", default=0.0, type=float, help="Used as v(empty) if missing from the table")
+    power_index.add_argument("--out", default=None, help="Write CSV/parquet to this path (default: <game-table>_<index>.csv)")
+    power_index.add_argument("--stdout", action="store_true", help="Print CSV to stdout instead of writing a file")
 
     return parser
 
@@ -653,6 +761,8 @@ def main() -> None:
         out_path = Path(args.out) if args.out else (Path(default_out) if default_out else None)
         if out_path is None:
             raise SystemExit("Output path is required: set game_table.cache_path in synergy config or pass --out.")
+        if out_path.suffix.lower() != ".csv":
+            out_path = out_path.with_suffix(".csv")
         X, y = load_task_dataset(Path(args.dataset_config), task=str(args.task))
         settings = GameTableSettings(
             enabled=True,
@@ -665,6 +775,15 @@ def main() -> None:
         table = build_game_table(X=X, y=y, players=list(X.columns), settings=settings, progress=not bool(args.no_progress))
         save_game_table(table, out_path)
         print(str(out_path))
+    elif args.command == "power-index":
+        run_power_index(
+            Path(args.game_table),
+            index=str(args.index),
+            out=args.out,
+            stdout=bool(args.stdout),
+            value_col=str(args.value_col),
+            v_empty=float(args.v_empty),
+        )
 
 
 if __name__ == "__main__":
