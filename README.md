@@ -30,7 +30,7 @@ Ontarioの「Bridge conditions」CSVを読み込み、BCIを序数ラベルに�
 - `deck_length_m`: デッキ（またはカルバート）長さ [m]
 - `span_count`: スパン/セル数（`NUMBER OF SPAN / CELLS` から数値を抽出して数値化）
 
-## 実験フロー（baseline10 → ゲームテーブル → 指標）
+## 実験フロー（baseline10 → ゲームテーブル）
 
 1) 実験用データセット作成（features/labels の生成）
 
@@ -46,30 +46,7 @@ poetry run bci-xai preprocess \
 poetry run bci-xai build-game-table \
   --dataset-config configs/datasets/bridge_conditions/experiments/baseline10/dataset.yml \
   --task baseline \
-  --synergy-config configs/datasets/bridge_conditions/experiments/baseline10/synergy.yml
+  --game-table-config configs/datasets/bridge_conditions/experiments/baseline10/game_table.yml
 ```
 
-既定の保存先は `configs/datasets/bridge_conditions/experiments/baseline10/synergy.yml` の `game_table.cache_path` です。
-
-3) 指標計算（Lex-cel）
-
-`configs/datasets/bridge_conditions/experiments/baseline10/synergy.yml` の `lexcel.*` を使い、ゲームテーブルから `lexcel` を計算して出力します。
-
-```bash
-poetry run bci-xai explain \
-  --dataset-config configs/datasets/bridge_conditions/experiments/baseline10/dataset.yml \
-  --synergy-config configs/datasets/bridge_conditions/experiments/baseline10/synergy.yml \
-  --id <structure_id> \
-  --stdout
-```
-
-4) 特徴量貢献度（Power index; Shapley / Banzhaf）
-
-ゲームテーブル（例: `artifacts/bridge_conditions/game_tables/baseline10.csv`）から、各特徴量の貢献度を計算してCSVに出力します。
-
-```bash
-poetry run bci-xai power-index \
-  --game-table artifacts/bridge_conditions/game_tables/baseline10.csv \
-  --index shapley \
-  --out artifacts/bridge_conditions/game_tables/baseline10_shapley.csv
-```
+既定の保存先は `configs/datasets/bridge_conditions/experiments/baseline10/game_table.yml` の `game_table.cache_path` です。

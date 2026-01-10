@@ -205,12 +205,12 @@ bridge-conditions-ordinal-synergy-xai/
         dataset.yml                    # 入出力パス、列名、クレンジング/前処理設定
         labeling.yml                   # ターゲット定義（連続/序数/ランク等）
         model.yml                      # 学習設定
-        synergy.yml                    # ゲームテーブル/説明設定
+        game_table.yml                 # ゲームテーブル設定
         experiments/
           <experiment_id>/
             dataset.yml                # 特徴量絞り込み等の差分（任意）
             labeling.yml               # ラベル差分（任意）
-            synergy.yml                # ゲームテーブル差分（任意）
+            game_table.yml             # ゲームテーブル差分（任意）
   src/
     bci_osxai/
       __init__.py
@@ -228,11 +228,6 @@ bridge-conditions-ordinal-synergy-xai/
         train.py
         predict.py
         evaluate.py
-      synergy/
-        interventions.py
-        candidate_sets.py
-        compare_rules.py
-        report.py
       cli/
         main.py
   artifacts/
@@ -249,7 +244,9 @@ bridge-conditions-ordinal-synergy-xai/
 
 - `dataset.yml`: 生データの場所、クレンジング設定、特徴量（列）選択、出力先（processed）を定義
 - `labeling.yml`: 目的変数（回帰/分類/序数/ランク）を定義
-- `synergy.yml`: ゲームテーブル作成設定（`metric` など）と説明（Lex-cel 等）設定を定義
+- `game_table.yml`: ゲームテーブル作成設定（`metric` など）を定義
+
+本リポジトリは **ゲームテーブル生成まで**を責務とし、シナジー計算・説明生成・Power index 等は扱わない。
 
 **ゲームテーブル `value` は常に「大きいほど良い」スコア**とし、回帰系は `inv_mae=1/(1+MAE)` のように 0〜1 へ正規化した指標を使う。
 
@@ -265,8 +262,7 @@ ARFF は nominal 値が bytes で返る場合があるため、前処理で文�
 CLI（最小）
 
 - bci-xai preprocess
-- bci-xai train
-- bci-xai explain --id <structure_id>
+- bci-xai build-game-table
 
 ---
 
@@ -282,5 +278,5 @@ CLI（最小）
 
 - データ入手元（Ontario Bridge conditions）
 - セットアップ（Poetry）
-- 実行手順（preprocess → train → explain）
-- 出力例（上位シナジー集合の表示形式）
+- 実行手順（preprocess → build-game-table）
+- 出力例（game_table.csv の列定義）

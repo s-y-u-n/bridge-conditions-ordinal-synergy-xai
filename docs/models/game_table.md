@@ -2,7 +2,7 @@
 
 ## 目的
 
-shapiq の内部サンプリングに依存せず、特徴集合（coalition）ごとに **自力で学習・予測** を行い、その予測性能を効用 `v(S)` とみなすことで、以降の Shapley / Lex-cel などの評価の土台となる **ゲームテーブル** を作成する。
+特徴集合（coalition）ごとに **自力で学習・予測** を行い、その予測性能を効用 `v(S)` とみなす **ゲームテーブル** を作成する。
 
 ## ゲームの定義
 
@@ -52,7 +52,5 @@ shapiq の内部サンプリングに依存せず、特徴集合（coalition）�
 `bci-xai build-game-table` で作成する（ゲームテーブルは常に `.csv`）。
 
 - `--task baseline|next-rank` で対象データを選択
-- `--synergy-config` の `game_table.*` を参照して設定する
+- `--game-table-config` の `game_table.*` を参照して設定する
 - `--out` で保存先を上書き可能
-
-`explain` / `explain-next-rank` は、`game_table.cache_path` が存在する場合はそれを読み込み、存在しない場合は `game_table.auto_build: true` のときのみ自動生成する。

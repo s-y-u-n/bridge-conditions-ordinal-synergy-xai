@@ -47,8 +47,7 @@ filters:
 inspection_year:
   default: 2020
 
-# Optional default `--id` for CLI commands like `explain` / `predict-next-rank`.
-# If omitted, you must pass `--id` explicitly.
+# Optional default ID (used for dataset-specific utilities).
+# If omitted, an ID must be provided explicitly where needed.
 structure_id:
   default: "01X-0018/C0"
-

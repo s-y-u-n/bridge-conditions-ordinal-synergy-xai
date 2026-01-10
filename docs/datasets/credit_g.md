@@ -75,7 +75,7 @@
 - `configs/datasets/credit_g/labeling.yml`
   - `target.source: column` / `target.column: class`
   - `scheme.type: column`（列をそのままラベルとして使う）
-- `configs/datasets/credit_g/synergy.yml`
+- `configs/datasets/credit_g/game_table.yml`
   - `game_table.metric: accuracy`
   - `game_table.cache_path: artifacts/credit_g/game_tables/game_table.csv`（CSV固定）
 
@@ -89,5 +89,20 @@ poetry run bci-xai preprocess \
 poetry run bci-xai build-game-table \
   --dataset-config configs/datasets/credit_g/dataset.yml \
   --task baseline \
-  --synergy-config configs/datasets/credit_g/synergy.yml
+  --game-table-config configs/datasets/credit_g/game_table.yml
+```
+
+## 実験（top10 全列挙）
+
+特徴量を 10 個に絞って（`2^10-1=1023` coalition）を全列挙してゲームテーブルを作る場合:
+
+```bash
+poetry run bci-xai preprocess \
+  --dataset-config configs/datasets/credit_g/experiments/top10/dataset.yml \
+  --labeling-config configs/datasets/credit_g/labeling.yml
+
+poetry run bci-xai build-game-table \
+  --dataset-config configs/datasets/credit_g/experiments/top10/dataset.yml \
+  --task baseline \
+  --game-table-config configs/datasets/credit_g/experiments/top10/game_table.yml
 ```

@@ -60,7 +60,6 @@ feature_columns:
     - deck_length_m
     - span_count
 
-# Optional default `--id` for CLI commands like `explain` / `predict-next-rank`.
+# Optional default ID (used for dataset-specific utilities).
 structure_id:
   default: "01X-0018/C0"
-

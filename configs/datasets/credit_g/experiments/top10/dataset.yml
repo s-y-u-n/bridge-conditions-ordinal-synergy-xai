@@ -1,0 +1,25 @@
+paths:
+  raw_csv: data/raw/dataset_31_credit-g.arff
+  structures_parquet: data/processed/credit_g_top10/structures.parquet
+  features_parquet: data/processed/credit_g_top10/features.parquet
+  labels_parquet: data/processed/credit_g_top10/labels.parquet
+
+io:
+  format: arff
+
+columns:
+  target: class
+
+feature_columns:
+  include:
+    - checking_status
+    - purpose
+    - credit_history
+    - employment
+    - property_magnitude
+    - savings_status
+    - other_payment_plans
+    - own_telephone
+    - personal_status
+    - other_parties
+

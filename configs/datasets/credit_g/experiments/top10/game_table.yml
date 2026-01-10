@@ -1,0 +1,11 @@
+game_table:
+  enabled: true
+  task: baseline
+  max_order: 10
+  n_coalitions: 1023
+  test_size: 0.25
+  metric: accuracy
+  seed: 42
+  cache_path: artifacts/credit_g/game_tables/top10_full.csv
+  auto_build: false
+

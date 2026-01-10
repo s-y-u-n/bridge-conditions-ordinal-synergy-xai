@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Sequence
+from typing import Any, Dict, List, Sequence
 
 import numpy as np
 import pandas as pd
@@ -25,8 +26,24 @@ def coalition_key(coalition: Sequence[str]) -> str:
 
 
 def _generate_coalitions(players: Sequence[str], *, max_order: int, n_coalitions: int, seed: int) -> List[List[str]]:
-    rng = np.random.default_rng(int(seed))
     players = [str(p) for p in players]
+    n = len(players)
+    max_order = max(1, int(max_order))
+    max_order = min(max_order, n)
+
+    # If the requested number of coalitions covers all subsets up to max_order,
+    # enumerate deterministically instead of sampling.
+    total = sum(math.comb(n, k) for k in range(1, max_order + 1))
+    if int(n_coalitions) >= int(total):
+        from itertools import combinations  # noqa: PLC0415
+
+        coalitions: List[List[str]] = []
+        for k in range(1, max_order + 1):
+            for combo in combinations(players, k):
+                coalitions.append(list(combo))
+        return coalitions
+
+    rng = np.random.default_rng(int(seed))
     unique: set[str] = set()
     coalitions: List[List[str]] = []
 
@@ -38,14 +55,11 @@ def _generate_coalitions(players: Sequence[str], *, max_order: int, n_coalitions
             coalitions.append([p])
 
     target = max(int(n_coalitions), len(coalitions))
-    max_order = max(1, int(max_order))
 
     attempts = 0
     while len(coalitions) < target and attempts < target * 50:
         attempts += 1
         size = int(rng.integers(1, max_order + 1))
-        if size > len(players):
-            size = len(players)
         subset = rng.choice(players, size=size, replace=False).tolist()
         k = coalition_key(subset)
         if k in unique:

@@ -1,6 +1,3 @@
-report:
-  top_k: 5
-
 game_table:
   enabled: true
   task: baseline
@@ -11,12 +8,3 @@ game_table:
   seed: 42
   cache_path: artifacts/<dataset_id>/game_tables/game_table.csv
   auto_build: false
-
-lexcel:
-  enabled: true
-  score_key: abs_value
-  tie_tol: 1.0e-12
-  min_order: 1
-  max_order: null
-  max_items: 20
-
