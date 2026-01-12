@@ -1,0 +1,27 @@
+paths:
+  raw_csv: data/raw/academic_success/dataset.csv
+  structures_csv: data/processed/academic_success__experiments__top10/structures.csv
+  features_csv: data/processed/academic_success__experiments__top10/features.csv
+  labels_csv: data/processed/academic_success__experiments__top10/labels.csv
+
+io:
+  format: csv
+  encoding: utf-8-sig
+  rename_columns: false
+
+columns:
+  target: Target
+
+feature_columns:
+  include:
+    - "Course"
+    - "Previous qualification"
+    - "Mother's qualification"
+    - "Father's qualification"
+    - "Scholarship holder"
+    - "Curricular units 1st sem (credited)"
+    - "Curricular units 1st sem (grade)"
+    - "Unemployment rate"
+    - "Inflation rate"
+    - "GDP"
+

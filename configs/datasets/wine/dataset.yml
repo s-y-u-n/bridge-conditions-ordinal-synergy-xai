@@ -1,0 +1,30 @@
+paths:
+  raw_csv: data/raw/wine/wine.data
+  structures_csv: data/processed/wine/structures.csv
+  features_csv: data/processed/wine/features.csv
+  labels_csv: data/processed/wine/labels.csv
+
+io:
+  format: csv
+  encoding: utf-8
+  rename_columns: false
+  has_header: false
+  columns:
+    - class
+    - Alcohol
+    - Malicacid
+    - Ash
+    - Alcalinity_of_ash
+    - Magnesium
+    - Total_phenols
+    - Flavanoids
+    - Nonflavanoid_phenols
+    - Proanthocyanins
+    - Color_intensity
+    - Hue
+    - 0D280_0D315_of_diluted_wines
+    - Proline
+
+columns:
+  target: class
+

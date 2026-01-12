@@ -1,10 +1,10 @@
 # Template for a generic tabular dataset (one row = one sample)
 paths:
-  raw_csv: data/raw/<dataset_id>.csv
-  raw_clean_csv: data/processed/<dataset_id>_clean.csv
-  structures_parquet: data/processed/<dataset_id>/structures.parquet
-  features_parquet: data/processed/<dataset_id>/features.parquet
-  labels_parquet: data/processed/<dataset_id>/labels.parquet
+  raw_csv: data/raw/<dataset_key>/raw.csv
+  raw_clean_csv: data/processed/<dataset_key>/raw_clean.csv
+  structures_csv: data/processed/<dataset_key>/structures.csv
+  features_csv: data/processed/<dataset_key>/features.csv
+  labels_csv: data/processed/<dataset_key>/labels.csv
 
 io:
   encoding: utf-8
@@ -17,4 +17,3 @@ columns:
 # Optional: restrict to a small feature set
 feature_columns:
   include: []
-

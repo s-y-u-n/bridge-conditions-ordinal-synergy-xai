@@ -1,0 +1,14 @@
+paths:
+  raw_csv: data/raw/student_placement/train.csv
+  structures_csv: data/processed/student_placement/structures.csv
+  features_csv: data/processed/student_placement/features.csv
+  labels_csv: data/processed/student_placement/labels.csv
+
+io:
+  format: csv
+  encoding: utf-8
+  rename_columns: false
+
+columns:
+  id: Student_ID
+  target: Placement_Status

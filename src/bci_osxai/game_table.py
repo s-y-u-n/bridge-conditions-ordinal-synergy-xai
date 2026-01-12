@@ -25,6 +25,35 @@ def coalition_key(coalition: Sequence[str]) -> str:
     return "|".join(sorted(str(x) for x in coalition))
 
 
+def build_coalition_patterns(players: Sequence[str], *, max_order: int | None = None) -> pd.DataFrame:
+    """Build a wide 0/1 table of all coalition patterns up to max_order (no model training)."""
+    players = [str(p) for p in players]
+    n = len(players)
+    if n == 0:
+        return pd.DataFrame(columns=["order", "coalition_key"])
+
+    if max_order is None:
+        max_order = n
+    max_order = max(1, int(max_order))
+    max_order = min(max_order, n)
+
+    from itertools import combinations  # noqa: PLC0415
+
+    coalitions: list[list[str]] = []
+    for k in range(1, max_order + 1):
+        for combo in combinations(players, k):
+            coalitions.append(list(combo))
+
+    base = pd.DataFrame({"coalition_key": [coalition_key(c) for c in coalitions], "order": [len(c) for c in coalitions]})
+    out = pd.DataFrame(0, index=base.index, columns=players, dtype=int)
+    for i, coalition in enumerate(coalitions):
+        for p in coalition:
+            out.at[i, p] = 1
+    out["order"] = base["order"].astype(int)
+    out["coalition_key"] = base["coalition_key"].astype(str)
+    return out
+
+
 def _generate_coalitions(players: Sequence[str], *, max_order: int, n_coalitions: int, seed: int) -> List[List[str]]:
     players = [str(p) for p in players]
     n = len(players)
@@ -201,9 +230,9 @@ def build_game_table(
 
 def load_game_table(path: str | Path) -> pd.DataFrame:
     path = Path(path)
-    if path.suffix.lower() == ".csv":
-        return pd.read_csv(path)
-    return pd.read_parquet(path)
+    if path.suffix.lower() != ".csv":
+        raise ValueError("Game table format is CSV only.")
+    return pd.read_csv(path)
 
 
 def save_game_table(df: pd.DataFrame, path: str | Path) -> Path:

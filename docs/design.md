@@ -45,15 +45,16 @@ Ontario "Bridge conditions" CSV を入力として、以下を実現する。
 
 ---
 
-## 3. 生成データ（中間テーブル）設計
+## 3. 生成データ（中間テーブル）設計（CSV固定）
 
 ### 3.1 データモデル
 
 - raw/bridge_conditions.csv（入手原本）
-- processed/structures.parquet（構造物単位: 最新断面）
-- processed/bci_long.parquet（年次BCIのlong形式）
-- features/features.parquet（学習用特徴量）
-- labels/labels.parquet（序数ラベル）
+- `data/processed/<dataset_key>/structures.csv`（構造物単位: 最新断面）
+- `data/processed/<dataset_key>/bci_long.csv`（年次BCIのlong形式; 該当データセットのみ）
+- `data/processed/<dataset_key>/features.csv`（学習用特徴量）
+- `data/processed/<dataset_key>/labels.csv`（ラベル; `label` 列を含む）
+- `data/processed/<dataset_key>/next_rank_dataset.csv`（next-rank 用; 該当データセットのみ）
 
 ### 3.2 long 形式（bci_long）
 
@@ -184,11 +185,11 @@ BCIは0–100の連続値なので、管理判断に合わせて段階化する�
 橋梁以外のデータセットでも同じ流れ（クレンジング→特徴量絞り込み→特徴マスクで学習/評価→ゲームテーブル作成）を回すため、
 設定ファイルは **データセット単位**でまとめ、実験ごとの差分は `experiments/` 配下で管理する。
 
-- すべての「成果物（artifacts）」は `artifacts/<dataset_id>/...` に集約する
+  - すべての「成果物（outputs）」は `outputs/<dataset_key>/...` に集約する
 - ゲームテーブルは **常に CSV** で保存する（外部ツールで扱いやすくする）
-- 学習済みモデルも `artifacts/<dataset_id>/models/` に保存する（再現性・再利用のため）
+- 学習済みモデルも `outputs/<dataset_key>/models/` に保存する（再現性・再利用のため）
 
-`dataset_id` は `bridge_conditions` のような識別子で、別データセット追加時はフォルダを増やすだけでよい。
+`dataset_key` は `bridge_conditions` のような識別子で、実験は `bridge_conditions__experiments__baseline10` のようにパス由来で一意化する。
 
 ### 8.2 ディレクトリ（推奨）
 
@@ -197,12 +198,12 @@ bridge-conditions-ordinal-synergy-xai/
   README.md
   pyproject.toml
   data/
-    raw/                               # 原本CSV（git管理しない）
-    processed/<dataset_id>/            # 中間テーブル（データセット単位）
+    raw/<dataset_key>/                 # 原本CSV（git管理しない; 1データセット=1フォルダ）
+    processed/<dataset_key>/           # 中間テーブル（CSV固定）
   configs/
     datasets/
       <dataset_id>/
-        dataset.yml                    # 入出力パス、列名、クレンジング/前処理設定
+        dataset.yml                    # 入出力パス（CSV）、列名、クレンジング/前処理設定
         labeling.yml                   # ターゲット定義（連続/序数/ランク等）
         model.yml                      # 学習設定
         game_table.yml                 # ゲームテーブル設定
@@ -230,10 +231,10 @@ bridge-conditions-ordinal-synergy-xai/
         evaluate.py
       cli/
         main.py
-  artifacts/
-    <dataset_id>/
+  outputs/
+    <dataset_key>/
       game_tables/                     # 常に .csv
-      reports/
+      analysis/
       models/
   notebooks/
   tests/
@@ -250,14 +251,9 @@ bridge-conditions-ordinal-synergy-xai/
 
 **ゲームテーブル `value` は常に「大きいほど良い」スコア**とし、回帰系は `inv_mae=1/(1+MAE)` のように 0〜1 へ正規化した指標を使う。
 
-### 8.4 入力フォーマット（CSV / ARFF）
+### 8.4 入力フォーマット（CSV固定）
 
-tabular データセット追加を容易にするため、`io.format` で入力フォーマットを切り替える。
-
-- `io.format: csv`（デフォルト）
-- `io.format: arff`（例: `data/raw/dataset_31_credit-g.arff`）
-
-ARFF は nominal 値が bytes で返る場合があるため、前処理で文字列へ正規化し、`?` は欠損として扱う。
+tabular データセットはすべて CSV とする（`io.format: csv`）。
 
 CLI（最小）
 
@@ -269,7 +265,7 @@ CLI（最小）
 ## 9. 運用・再現性
 
 - rawデータは data/raw に置き、git管理しない（.gitignore）
-- 生成物（parquet, model artifacts, reports）は data/processed, artifacts/ に出力
+- 生成物（CSV, models, analysis, game tables）は data/processed, outputs/ に出力
 - すべての閾値・前処理は configs/ で固定し、実験再現性を担保
 
 ---

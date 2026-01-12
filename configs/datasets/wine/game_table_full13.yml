@@ -1,0 +1,12 @@
+game_table:
+  enabled: true
+  task: baseline
+  # 13特徴量の全組み合わせ（空集合を除く）= 2^13 - 1 = 8191
+  max_order: 13
+  n_coalitions: 8191
+  test_size: 0.25
+  metric: accuracy
+  seed: 42
+  cache_path: outputs/wine/game_tables/game_table_full13.csv
+  auto_build: false
+

@@ -18,7 +18,7 @@
 
 ## 出力（CSV固定）
 
-`artifacts/**/game_tables/*.csv` に保存する（常にCSV）。
+`outputs/**/game_tables/*.csv` に保存する（常にCSV）。
 
 列:
 

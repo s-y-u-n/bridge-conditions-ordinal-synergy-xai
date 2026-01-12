@@ -6,6 +6,5 @@ game_table:
   test_size: 0.25
   metric: accuracy
   seed: 42
-  cache_path: artifacts/credit_g/game_tables/top10_full.csv
+  cache_path: outputs/credit_g__experiments__top10/game_tables/game_table.csv
   auto_build: false
-

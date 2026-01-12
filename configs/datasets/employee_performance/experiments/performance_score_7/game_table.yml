@@ -1,0 +1,12 @@
+game_table:
+  enabled: true
+  task: baseline
+  # 7 features => 2^7 - 1 = 127 coalitions (include all)
+  max_order: 7
+  n_coalitions: 127
+  test_size: 0.25
+  metric: accuracy
+  seed: 42
+  cache_path: outputs/employee_performance__experiments__performance_score_7/game_tables/game_table.csv
+  auto_build: false
+

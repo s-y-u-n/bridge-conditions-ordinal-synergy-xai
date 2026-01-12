@@ -1,0 +1,27 @@
+active_scheme: PERFORMANCE_SCORE_5
+
+target:
+  source: column
+  column: Performance_Score
+
+schemes:
+  PERFORMANCE_SCORE_5:
+    # Keep Performance_Score as an ordinal *classification* target (not regression)
+    # by mapping numeric scores -> non-numeric string labels (so CSV reload won't infer int).
+    type: fixed_thresholds
+    labels:
+      - name: "S1"
+        min_inclusive: 1
+        max_exclusive: 2
+      - name: "S2"
+        min_inclusive: 2
+        max_exclusive: 3
+      - name: "S3"
+        min_inclusive: 3
+        max_exclusive: 4
+      - name: "S4"
+        min_inclusive: 4
+        max_exclusive: 5
+      - name: "S5"
+        min_inclusive: 5
+        max_inclusive: 5

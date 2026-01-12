@@ -1,11 +1,11 @@
 paths:
-  raw_csv: data/raw/dataset_31_credit-g.arff
-  structures_parquet: data/processed/credit_g_top10/structures.parquet
-  features_parquet: data/processed/credit_g_top10/features.parquet
-  labels_parquet: data/processed/credit_g_top10/labels.parquet
+  raw_csv: data/raw/credit_g/credit_g.csv
+  structures_csv: data/processed/credit_g__experiments__top10/structures.csv
+  features_csv: data/processed/credit_g__experiments__top10/features.csv
+  labels_csv: data/processed/credit_g__experiments__top10/labels.csv
 
 io:
-  format: arff
+  format: csv
 
 columns:
   target: class
@@ -22,4 +22,3 @@ feature_columns:
     - own_telephone
     - personal_status
     - other_parties
-

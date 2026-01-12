@@ -6,5 +6,5 @@ game_table:
   test_size: 0.25
   metric: inv_mae
   seed: 42
-  cache_path: artifacts/bridge_conditions/game_tables/baseline10_continuous.csv
+  cache_path: outputs/bridge_conditions__experiments__baseline10_continuous/game_tables/game_table.csv
   auto_build: false

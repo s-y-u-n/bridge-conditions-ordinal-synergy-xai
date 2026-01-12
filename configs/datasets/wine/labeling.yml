@@ -1,0 +1,11 @@
+active_scheme: CLASS
+
+target:
+  source: column
+  column: class
+  as_categorical: true
+
+schemes:
+  CLASS:
+    type: column
+

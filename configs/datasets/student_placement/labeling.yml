@@ -1,0 +1,10 @@
+active_scheme: PLACEMENT
+
+target:
+  source: column
+  column: Placement_Status
+
+schemes:
+  PLACEMENT:
+    type: column
+

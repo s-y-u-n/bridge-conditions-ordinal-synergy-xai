@@ -6,5 +6,5 @@ game_table:
   test_size: 0.25
   metric: inv_mae
   seed: 42
-  cache_path: artifacts/<dataset_id>/game_tables/game_table.csv
+  cache_path: outputs/<dataset_key>/game_tables/game_table.csv
   auto_build: false

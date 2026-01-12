@@ -1,0 +1,10 @@
+active_scheme: CONTINUOUS
+
+target:
+  source: column
+  column: Yield_tons_per_hectare
+
+schemes:
+  CONTINUOUS:
+    type: continuous_bci
+

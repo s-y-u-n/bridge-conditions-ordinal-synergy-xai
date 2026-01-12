@@ -1,0 +1,30 @@
+paths:
+  raw_csv: data/raw/crop/crop_yield.csv
+  structures_csv: data/processed/crop/structures.csv
+  features_csv: data/processed/crop/features.csv
+  labels_csv: data/processed/crop/labels.csv
+
+io:
+  format: csv
+  encoding: utf-8
+  rename_columns: false
+
+columns:
+  target: Yield_tons_per_hectare
+  crop: Crop
+
+# 条件を揃えるため、最頻出の Crop のみを使用（現状: Maize）
+filters:
+  crop: Maize
+
+# Days_to_Harvest は除外し、Crop はフィルタで定数化するので特徴量から外す
+feature_columns:
+  include:
+    - Region
+    - Soil_Type
+    - Rainfall_mm
+    - Temperature_Celsius
+    - Fertilizer_Used
+    - Irrigation_Used
+    - Weather_Condition
+

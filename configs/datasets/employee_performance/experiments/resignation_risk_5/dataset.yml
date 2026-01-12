@@ -1,0 +1,15 @@
+paths:
+  raw_csv: data/raw/employee_performance/Extended_Employee_Performance_and_Productivity_Data.csv
+  structures_csv: data/processed/employee_performance__experiments__resignation_risk_5/structures.csv
+  features_csv: data/processed/employee_performance__experiments__resignation_risk_5/features.csv
+  labels_csv: data/processed/employee_performance__experiments__resignation_risk_5/labels.csv
+
+io:
+  format: csv
+  encoding: utf-8
+  rename_columns: false
+
+columns:
+  id: Employee_ID
+  target: Resigned
+

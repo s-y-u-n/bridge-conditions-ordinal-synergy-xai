@@ -1,0 +1,15 @@
+game_table:
+  enabled: true
+  task: baseline
+  # 使用特徴量は 7個（Days_to_Harvest 除外 + Crop は定数化）
+  # 全組み合わせ（空集合除く）= 2^7 - 1 = 127
+  max_order: 7
+  n_coalitions: 127
+  test_size: 0.25
+  metric: inv_mae
+  seed: 42
+  # 大規模データ（~16万行）で coalition ごとに学習するため、OS に kill されやすい。
+  # まずはサンプリングしてゲームテーブルを作る（必要なら増やす）。
+  max_rows: 1000
+  cache_path: outputs/crop/game_tables/game_table_full.csv
+  auto_build: false

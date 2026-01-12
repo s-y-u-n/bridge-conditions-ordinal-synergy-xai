@@ -2,7 +2,7 @@
 
 ## 目的
 
-`data/raw/dataset_31_credit-g.arff`（German Credit / credit-g）を入力として、
+`data/raw/credit_g/credit_g.csv`（German Credit / credit-g）を入力として、
 既存の共通フロー
 
 1) データクレンジング
@@ -13,25 +13,24 @@
 
 ## 入力
 
-- ファイル: `data/raw/dataset_31_credit-g.arff`
-- 形式: ARFF（`@attribute` / `@data`）
+- ファイル: `data/raw/credit_g/credit_g.csv`
+- 形式: CSV
 - 目的変数: `class`（`good` / `bad`）
 
 ## クレンジング方針
 
-- ARFF を `scipy.io.arff.loadarff` で読み込む
-- nominal 値（bytes のことがある）は UTF-8 でデコードして `object` に統一する
-- `?` を欠損として `NA` に正規化する
+- CSV を読み込む
+- `?` を欠損として `NA` に正規化する（必要なら）
 
 ## 中間生成物（processed）
 
-`data/processed/credit_g/` に次を出力する:
+`data/processed/credit_g/` に次を出力する（CSV固定）:
 
-- `structures.parquet`: クレンジング済みの全テーブル（`structure_id` を付与）
-- `features.parquet`: 学習用特徴量（`structure_id` を含む）
-- `labels.parquet`: 目的変数（`structure_id`, `label`）
+- `structures.csv`: クレンジング済みの全テーブル（`structure_id` を付与）
+- `features.csv`: 学習用特徴量（`structure_id` を含む）
+- `labels.csv`: 目的変数（`structure_id`, `label`）
 
-※ tabular データセットでは `bci_long.parquet` は作らない。
+※ tabular データセットでは `bci_long.csv` は作らない。
 
 ## 特徴量（入力列）
 
@@ -70,14 +69,14 @@
 ## 設定ファイル
 
 - `configs/datasets/credit_g/dataset.yml`
-  - `io.format: arff` を指定
-  - `paths.*_parquet` の出力先を `data/processed/credit_g/` に集約
+  - `io.format: csv` を指定
+  - `paths.*_csv` の出力先を `data/processed/credit_g/` に集約
 - `configs/datasets/credit_g/labeling.yml`
   - `target.source: column` / `target.column: class`
   - `scheme.type: column`（列をそのままラベルとして使う）
 - `configs/datasets/credit_g/game_table.yml`
   - `game_table.metric: accuracy`
-  - `game_table.cache_path: artifacts/credit_g/game_tables/game_table.csv`（CSV固定）
+  - `game_table.cache_path: outputs/credit_g/game_tables/game_table.csv`（CSV固定）
 
 ## 実行例
 

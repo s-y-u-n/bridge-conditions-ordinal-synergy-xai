@@ -6,5 +6,5 @@ game_table:
   test_size: 0.25
   metric: accuracy
   seed: 42
-  cache_path: artifacts/bridge_conditions/game_tables/next_rank_fast.csv
+  cache_path: outputs/bridge_conditions/game_tables/next_rank_fast.csv
   auto_build: false

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Union
+from typing import Sequence, Union
 
 import pandas as pd
 
@@ -7,25 +9,20 @@ import pandas as pd
 PathLike = Union[str, Path]
 
 
-def load_raw_csv(path: PathLike, encoding: str | None = None) -> pd.DataFrame:
-    """Load the raw Ontario bridge conditions CSV."""
-    return pd.read_csv(Path(path), encoding=encoding)
+def load_raw_csv(
+    path: PathLike,
+    *,
+    encoding: str | None = None,
+    has_header: bool = True,
+    columns: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    """Load a raw CSV dataset.
 
-
-def load_raw_arff(path: PathLike) -> pd.DataFrame:
-    """Load an ARFF file into a pandas DataFrame.
-
-    Notes:
-    - `scipy.io.arff.loadarff` often returns nominal columns as `bytes`; we decode them to `str`.
-    - Missing values may appear as '?' strings; we normalize them to NA.
+    Some UCI-style datasets ship without a header row; set has_header=False and
+    provide `columns` to name the fields.
     """
-    from scipy.io import arff  # noqa: PLC0415
-
-    data, _meta = arff.loadarff(str(Path(path)))
-    df = pd.DataFrame(data)
-
-    for col in df.columns:
-        if df[col].dtype == object:
-            df[col] = df[col].map(lambda x: x.decode("utf-8") if isinstance(x, (bytes, bytearray)) else x)
-            df[col] = df[col].replace("?", pd.NA)
-    return df
+    if has_header:
+        return pd.read_csv(Path(path), encoding=encoding)
+    if not columns:
+        raise ValueError("columns is required when has_header=False.")
+    return pd.read_csv(Path(path), encoding=encoding, header=None, names=list(columns))

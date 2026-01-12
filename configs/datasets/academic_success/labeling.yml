@@ -1,0 +1,10 @@
+active_scheme: TARGET
+
+target:
+  source: column
+  column: Target
+
+schemes:
+  TARGET:
+    type: column
+

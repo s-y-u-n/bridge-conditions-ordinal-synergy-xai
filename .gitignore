@@ -28,8 +28,8 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
-artifacts/*
-!artifacts/.gitkeep
+outputs/*
+!outputs/.gitkeep
 
 # Notebooks
 .ipynb_checkpoints/

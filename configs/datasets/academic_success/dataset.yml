@@ -1,0 +1,14 @@
+paths:
+  raw_csv: data/raw/academic_success/dataset.csv
+  structures_csv: data/processed/academic_success/structures.csv
+  features_csv: data/processed/academic_success/features.csv
+  labels_csv: data/processed/academic_success/labels.csv
+
+io:
+  format: csv
+  encoding: utf-8-sig
+  rename_columns: false
+
+columns:
+  target: Target
+

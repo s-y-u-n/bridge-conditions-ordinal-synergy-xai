@@ -1,0 +1,25 @@
+paths:
+  raw_csv: data/raw/employee_performance/Extended_Employee_Performance_and_Productivity_Data.csv
+  structures_csv: data/processed/employee_performance__experiments__performance_score_7/structures.csv
+  features_csv: data/processed/employee_performance__experiments__performance_score_7/features.csv
+  labels_csv: data/processed/employee_performance__experiments__performance_score_7/labels.csv
+
+io:
+  format: csv
+  encoding: utf-8
+  rename_columns: false
+
+columns:
+  id: Employee_ID
+  target: Performance_Score
+
+feature_columns:
+  include:
+    - Years_At_Company
+    - Education_Level
+    - Work_Hours_Per_Week
+    - Overtime_Hours
+    - Projects_Handled
+    - Remote_Work_Frequency
+    - Training_Hours
+

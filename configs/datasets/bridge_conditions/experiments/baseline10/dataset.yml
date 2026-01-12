@@ -1,11 +1,11 @@
 paths:
-  raw_csv: data/raw/bridge_conditions.csv
-  raw_clean_csv: data/processed/bridge_conditions_clean.csv
+  raw_csv: data/raw/bridge_conditions/bridge_conditions.csv
+  raw_clean_csv: data/processed/bridge_conditions/bridge_conditions_clean.csv
   data_dictionary: docs/data_dictionary_bridge_conditions.md
-  structures_parquet: data/processed/baseline10/structures.parquet
-  bci_long_parquet: data/processed/baseline10/bci_long.parquet
-  features_parquet: data/processed/baseline10/features.parquet
-  labels_parquet: data/processed/baseline10/labels.parquet
+  structures_csv: data/processed/bridge_conditions__experiments__baseline10/structures.csv
+  bci_long_csv: data/processed/bridge_conditions__experiments__baseline10/bci_long.csv
+  features_csv: data/processed/bridge_conditions__experiments__baseline10/features.csv
+  labels_csv: data/processed/bridge_conditions__experiments__baseline10/labels.csv
 
 io:
   encoding: utf-8
