@@ -10,16 +10,19 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import FunctionTransformer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 
 def _build_preprocessor(features: pd.DataFrame) -> ColumnTransformer:
-    numeric_features = features.select_dtypes(include=["number"]).columns
-    categorical_features = features.select_dtypes(exclude=["number"]).columns
+    # Treat bool as numeric to avoid SimpleImputer(bool) errors in recent scikit-learn.
+    numeric_features = features.select_dtypes(include=["number", "bool", "boolean"]).columns
+    categorical_features = features.select_dtypes(exclude=["number", "bool", "boolean"]).columns
 
     numeric_transformer = Pipeline(
         [
             ("imputer", SimpleImputer(strategy="median")),
+            ("to_float", FunctionTransformer(lambda x: x.astype(float), feature_names_out="one-to-one")),
             ("scaler", StandardScaler(with_mean=False)),
         ]
     )

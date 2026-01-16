@@ -1,0 +1,17 @@
+paths:
+  raw_csv: data/raw/crop/crop_yield.csv
+
+io:
+  format: csv
+  encoding: utf-8
+  rename_columns: false
+
+# build-crop-policy-game-table 用の列名マッピング
+columns:
+  crop: Crop
+  soil: Soil_Type
+  rainfall: Rainfall_mm
+  irrigation: Irrigation_Used
+  fertilizer: Fertilizer_Used
+  target: Yield_tons_per_hectare
+

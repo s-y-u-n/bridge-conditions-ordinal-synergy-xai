@@ -6,5 +6,10 @@ game_table:
   test_size: 0.25
   metric: inv_mae
   seed: 42
+  # スコアの安定化: 複数seed平均 / CV
+  # - n_repeats>1: seed, seed+1, ... の分割を平均
+  # - cv_folds>=2: (Stratified)KFold によるCV平均
+  n_repeats: 1
+  cv_folds: 0
   cache_path: outputs/<dataset_key>/game_tables/game_table.csv
   auto_build: false

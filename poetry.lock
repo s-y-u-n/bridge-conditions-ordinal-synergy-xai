@@ -487,6 +487,20 @@ files = [
 ]
 
 [[package]]
+name = "japanize-matplotlib"
+version = "1.1.3"
+description = "matplotlibのフォント設定を自動で日本語化する"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "japanize-matplotlib-1.1.3.tar.gz", hash = "sha256:e89e7d9e109820962650e59a130403b59b33915fde3871a265a5891d9bf5e079"},
+]
+
+[package.dependencies]
+matplotlib = "*"
+
+[[package]]
 name = "joblib"
 version = "1.5.3"
 description = "Lightweight pipelining with Python functions"
@@ -1841,4 +1855,4 @@ scikit-learn = ["scikit-learn"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "5c820c61b4508d7b814312281bff780844abac5d9914ed19840219ab25cc9da7"
+content-hash = "3a0c74329907e081076cb219535628402b0f34c964107321cb8348addbcf2a8e"

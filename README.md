@@ -162,6 +162,20 @@ UCI Wine データセット（3クラス分類）。化学分析値（13特徴�
   - `Irrigation_Used`: 灌漑使用（True=使用, False=未使用）
   - `Weather_Condition`: 天候（Sunny / Rainy / Cloudy）
 
+### crop_policy（政策 16 パターンの平均収穫量テーブル）
+
+`crop_yield.csv` の観測データから、最頻出の `Crop` に絞った上で、4つの政策フラグ（0/1）の全16パターンについて **平均収穫量** を集計したテーブルを作成する（学習なし）。
+
+- `high_rain_region`: `Rainfall_mm` を k=2 でクラスタリングし、中心が大きいクラスタを 1
+- `irrigation_used`: `Irrigation_Used==True` を 1
+- `fertilizer_used`: `Fertilizer_Used==True` を 1
+- `improved_soil`: 平均収穫量が最大の `Soil_Type` を 1
+
+```bash
+poetry run bci-xai build-crop-policy-game-table \
+  --dataset-config configs/datasets/crop_policy/dataset.yml
+```
+
 ## 実験フロー（baseline10 → ゲームテーブル）
 
 1) 実験用データセット作成（features/labels の生成）
@@ -183,6 +197,8 @@ poetry run bci-xai build-game-table \
 
 既定の保存先は `configs/datasets/bridge_conditions/experiments/baseline10/game_table.yml` の `game_table.cache_path` です。
 
+分割によるスコアのブレを抑えたい場合は、`game_table.yml` の `game_table.n_repeats`（複数seed平均）や `game_table.cv_folds`（交差検証）を設定できます。
+
 ## 特徴量の分析（前段のEDA）
 
 学習用データ（`features.csv` / `labels.csv`）から、欠損・分布・目的変数との関連度などを `outputs/` 配下へ出力します。
@@ -197,4 +213,118 @@ poetry run bci-xai analyze-dataset \
 
 ```bash
 poetry run bci-xai analyze-all-datasets --task baseline --continue-on-error
+```
+
+## スコアのベースライン・ランキング・可視化
+
+空集合（無情報）ベースライン `v(∅)` を計算する:
+
+```bash
+poetry run bci-xai build-empty-baseline \
+  --dataset-config configs/datasets/crop/dataset.yml \
+  --task baseline \
+  --game-table-config configs/datasets/crop/game_table_full.yml
+```
+
+wine の場合:
+
+```bash
+poetry run bci-xai build-empty-baseline \
+  --dataset-config configs/datasets/wine/dataset.yml \
+  --task baseline \
+  --game-table-config configs/datasets/wine/game_table.yml
+```
+
+ゲームテーブルのスコア分布（ヒストグラム）をプロットする（ベースライン線つき）:
+
+```bash
+poetry run bci-xai plot-game-table-scores \
+  --game-table-csv outputs/crop/game_tables/game_table_full.csv \
+  --empty-baseline-csv outputs/crop/game_tables/empty_baseline.csv \
+  --out outputs/crop/game_tables/game_table_full__score_distribution.png
+```
+
+wine の場合:
+
+```bash
+poetry run bci-xai plot-game-table-scores \
+  --game-table-csv outputs/wine/game_tables/game_table.csv \
+  --empty-baseline-csv outputs/wine/game_tables/empty_baseline.csv \
+  --out outputs/wine/game_tables/game_table__score_distribution.png
+```
+
+スコアを最適1次元区間分割（連続区間制約つきk-means/Jenks）で弱順序 `Σ1 ≻ Σ2 ≻ …` に分割し、rank（`class_id`）を付与する:
+
+```bash
+poetry run bci-xai rank-game-table \
+  --game-table-csv outputs/crop/game_tables/game_table_full.csv \
+  --score-col value \
+  --plot-out outputs/crop/game_tables/game_table_full__score_distribution.png \
+  --empty-baseline-csv outputs/crop/game_tables/empty_baseline.csv
+```
+
+wine の場合:
+
+```bash
+poetry run bci-xai rank-game-table \
+  --game-table-csv outputs/wine/game_tables/game_table.csv \
+  --score-col value \
+  --plot-out outputs/wine/game_tables/game_table__score_distribution.png \
+  --empty-baseline-csv outputs/wine/game_tables/empty_baseline.csv
+```
+
+提携×特徴量のヒートマップを出力する（上位順; 使われた特徴量を赤で表示）:
+
+```bash
+poetry run bci-xai plot-game-table-heatmap \
+  --game-table-csv outputs/crop/game_tables/game_table_full.csv \
+  --ranked-csv outputs/crop/game_tables/game_table_full__ranked.csv \
+  --out outputs/crop/game_tables/game_table_full__heatmap.png \
+  --top-n 200
+```
+
+rank の生成と同時にヒートマップも出力する場合:
+
+```bash
+poetry run bci-xai rank-game-table \
+  --game-table-csv outputs/crop/game_tables/game_table_full.csv \
+  --score-col value \
+  --empty-baseline-csv outputs/crop/game_tables/empty_baseline.csv \
+  --ranked-format score-only \
+  --heatmap-out outputs/crop/game_tables/game_table_full__heatmap.png
+```
+
+### データセットごとの一括パイプライン
+
+上記（空集合ベースライン → ゲームテーブル（任意） → ランク付与 → 分布プロット → ヒートマップ）をまとめて実行する:
+
+```bash
+poetry run bci-xai run-dataset-pipeline \
+  --dataset-config configs/datasets/crop/dataset.yml \
+  --labeling-config configs/datasets/crop/labeling.yml \
+  --game-table-config configs/datasets/crop/game_table_full.yml \
+  --task baseline
+```
+
+既に `game_table.cache_path` が存在する場合は、学習（build-game-table）をスキップして可視化だけ行う:
+
+```bash
+poetry run bci-xai run-dataset-pipeline \
+  --dataset-config configs/datasets/wine/dataset.yml \
+  --skip-preprocess \
+  --skip-game-table \
+  --game-table-config configs/datasets/wine/game_table.yml \
+  --task baseline
+```
+
+実行せずに、出力先と手順だけ確認する（dry-run）:
+
+```bash
+poetry run bci-xai run-dataset-pipeline \
+  --dataset-config configs/datasets/wine/dataset.yml \
+  --skip-preprocess \
+  --skip-game-table \
+  --game-table-config configs/datasets/wine/game_table.yml \
+  --task baseline \
+  --dry-run
 ```

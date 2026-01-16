@@ -6,10 +6,10 @@ game_table:
   max_order: 7
   n_coalitions: 127
   test_size: 0.25
-  metric: inv_mae
+  metric: mae
   seed: 42
   # 大規模データ（~16万行）で coalition ごとに学習するため、OS に kill されやすい。
   # まずはサンプリングしてゲームテーブルを作る（必要なら増やす）。
-  max_rows: 1000
+  max_rows: 100000
   cache_path: outputs/crop/game_tables/game_table_full.csv
   auto_build: false

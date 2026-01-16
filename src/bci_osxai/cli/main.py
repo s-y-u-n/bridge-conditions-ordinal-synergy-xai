@@ -8,13 +8,24 @@ import pandas as pd
 import yaml
 
 from bci_osxai.features.build_features import build_features
-from bci_osxai.game_table import GameTableSettings, build_coalition_patterns, build_game_table, save_game_table
+from bci_osxai.game_table import (
+    GameTableSettings,
+    build_coalition_patterns,
+    build_empty_baseline_table,
+    build_game_table,
+    compute_empty_baseline,
+    save_game_table,
+)
 from bci_osxai.io.load_raw import load_raw_csv
 from bci_osxai.labels.make_column_labels import make_column_labels
 from bci_osxai.labels.make_continuous_targets import make_continuous_targets
 from bci_osxai.labels.make_ordinal_labels import make_ordinal_labels
 from bci_osxai.labels.make_rehab_floor_rank_labels import RehabFloorRankConfig, make_rehab_floor_rank_labels
 from bci_osxai.analysis.dataset_analysis import analyze_dataset, discover_dataset_configs, infer_dataset_key
+from bci_osxai.analysis.coalition_heatmap import plot_coalition_feature_heatmap
+from bci_osxai.analysis.game_table_plots import plot_score_distribution
+from bci_osxai.pipeline.dataset_pipeline import infer_pipeline_paths
+from bci_osxai.ranking.weak_order import Criterion, dumps_json, rank_to_weak_order
 from bci_osxai.preprocess.build_next_rank_dataset import NextRankConfig, build_next_rank_dataset
 from bci_osxai.preprocess.clean_raw_csv import clean_multiline_csv, load_rename_map_from_data_dictionary
 from bci_osxai.preprocess.clean_schema import normalize_column_whitespace
@@ -24,6 +35,11 @@ from bci_osxai.analysis.resignation_rate_table import (
     ResignationRateSettings,
     build_resignation_rate_table,
     build_resignation_risk_factors,
+)
+from bci_osxai.analysis.crop_policy_game_table import (
+    CropPolicySpec,
+    build_crop_policy_flags,
+    build_crop_policy_game_table,
 )
 
 
@@ -113,14 +129,17 @@ def run_preprocess(dataset_config: Path, labeling_config: Path) -> None:
     for key, value in filters.items():
         column_name = columns.get(key)
         if column_name and column_name in df.columns:
-            df = df[df[column_name] == value]
+            df = df[df[column_name] == value].copy()
+    # Ensure stable row indexing after filtering; avoids accidental index-alignment
+    # issues when creating new Series (e.g., structure_id) downstream.
+    df = df.reset_index(drop=True)
 
     id_source = columns.get("id")
     df = df.copy()
     if id_source is not None and str(id_source).strip() != "" and str(id_source) in df.columns:
         df["structure_id"] = df[str(id_source)].astype(str)
     else:
-        df["structure_id"] = pd.Series(range(1, len(df) + 1), dtype="int64").astype(str)
+        df["structure_id"] = pd.Series(range(1, len(df) + 1), index=df.index, dtype="int64").astype(str)
 
     is_bridge_conditions = bool(dataset_cfg.get("bci_years")) and bool(columns.get("current_bci"))
     bci_long = None
@@ -257,25 +276,13 @@ def run_build_game_table(*, dataset_config: Path, game_table_config: Path, task:
         if max_rows > 0 and len(y) > max_rows:
             from sklearn.model_selection import train_test_split  # noqa: PLC0415
 
+            seed = int(game_cfg.get("seed", 42))
             is_regression = pd.api.types.is_numeric_dtype(y)
             if is_regression:
-                X, _, y, _ = train_test_split(
-                    X,
-                    y,
-                    train_size=max_rows,
-                    random_state=int(game_cfg.get("seed", 42)),
-                    shuffle=True,
-                )
+                X, _, y, _ = train_test_split(X, y, train_size=max_rows, random_state=seed, shuffle=True)
             else:
                 stratify = y if y.nunique(dropna=True) > 1 else None
-                X, _, y, _ = train_test_split(
-                    X,
-                    y,
-                    train_size=max_rows,
-                    random_state=int(game_cfg.get("seed", 42)),
-                    shuffle=True,
-                    stratify=stratify,
-                )
+                X, _, y, _ = train_test_split(X, y, train_size=max_rows, random_state=seed, shuffle=True, stratify=stratify)
 
     settings = GameTableSettings(
         enabled=True,
@@ -284,10 +291,318 @@ def run_build_game_table(*, dataset_config: Path, game_table_config: Path, task:
         test_size=float(game_cfg.get("test_size", 0.25)),
         metric=str(game_cfg.get("metric", "accuracy")),
         seed=int(game_cfg.get("seed", 42)),
+        n_repeats=int(game_cfg.get("n_repeats", 1) or 1),
+        cv_folds=int(game_cfg.get("cv_folds", 0) or 0),
     )
     table = build_game_table(X=X, y=y, players=list(X.columns), settings=settings, progress=not bool(no_progress))
     save_game_table(table, out_path)
     print(str(out_path))
+
+
+def run_build_empty_baseline(*, dataset_config: Path, game_table_config: Path, task: str, out: str | None) -> None:
+    cfg = load_yaml(game_table_config)
+    game_cfg = (cfg.get("game_table", {}) or {}) if isinstance(cfg, dict) else {}
+
+    if out:
+        out_path = Path(out)
+    else:
+        dataset_key = infer_dataset_key(dataset_config)
+        out_path = Path("outputs") / dataset_key / "game_tables" / "empty_baseline.csv"
+    if out_path.suffix.lower() != ".csv":
+        out_path = out_path.with_suffix(".csv")
+
+    X, y = load_task_dataset(dataset_config, task=str(task))
+    max_rows = game_cfg.get("max_rows")
+    if max_rows is not None:
+        max_rows = int(max_rows)
+        if max_rows > 0 and len(y) > max_rows:
+            from sklearn.model_selection import train_test_split  # noqa: PLC0415
+
+            seed = int(game_cfg.get("seed", 42))
+            is_regression = pd.api.types.is_numeric_dtype(y)
+            if is_regression:
+                X, _, y, _ = train_test_split(X, y, train_size=max_rows, random_state=seed, shuffle=True)
+            else:
+                stratify = y if y.nunique(dropna=True) > 1 else None
+                X, _, y, _ = train_test_split(X, y, train_size=max_rows, random_state=seed, shuffle=True, stratify=stratify)
+
+    settings = GameTableSettings(
+        enabled=True,
+        max_order=int(game_cfg.get("max_order", 2)),
+        n_coalitions=int(game_cfg.get("n_coalitions", 400)),
+        test_size=float(game_cfg.get("test_size", 0.25)),
+        metric=str(game_cfg.get("metric", "accuracy")),
+        seed=int(game_cfg.get("seed", 42)),
+        n_repeats=int(game_cfg.get("n_repeats", 1) or 1),
+        cv_folds=int(game_cfg.get("cv_folds", 0) or 0),
+    )
+    baseline = compute_empty_baseline(X=X, y=y, settings=settings)
+    table = build_empty_baseline_table(players=list(X.columns), baseline=baseline)
+    save_game_table(table, out_path)
+    print(str(out_path))
+
+
+def run_build_crop_policy_game_table(*, dataset_config: Path, out: str | None, crop: str | None) -> None:
+    dataset_cfg = load_yaml(dataset_config)
+    paths = dataset_cfg.get("paths", {}) or {}
+    columns = dataset_cfg.get("columns", {}) or {}
+    encoding = (dataset_cfg.get("io") or {}).get("encoding")
+    csv_has_header = bool((dataset_cfg.get("io") or {}).get("has_header", True))
+    csv_columns = (dataset_cfg.get("io") or {}).get("columns")
+
+    raw_path = paths.get("raw_csv") or paths.get("raw_path")
+    if not raw_path:
+        raise SystemExit("dataset.paths.raw_csv (or raw_path) is required.")
+
+    df = load_raw_csv(raw_path, encoding=encoding, has_header=csv_has_header, columns=csv_columns)
+    df = normalize_column_whitespace(df)
+
+    dataset_key = infer_dataset_key(dataset_config)
+    if out:
+        out_path = Path(out)
+    else:
+        out_path = Path("outputs") / dataset_key / "game_tables" / "game_table.csv"
+    if out_path.suffix.lower() != ".csv":
+        out_path = out_path.with_suffix(".csv")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    spec = CropPolicySpec(
+        crop_col=str(columns.get("crop", "Crop")),
+        soil_col=str(columns.get("soil", "Soil_Type")),
+        rainfall_col=str(columns.get("rainfall", "Rainfall_mm")),
+        irrigation_col=str(columns.get("irrigation", "Irrigation_Used")),
+        fertilizer_col=str(columns.get("fertilizer", "Fertilizer_Used")),
+        target_col=str(columns.get("target", "Yield_tons_per_hectare")),
+    )
+    factors, meta = build_crop_policy_flags(df, spec=spec, crop_value=crop)
+    players = [spec.out_high_rain_flag, spec.out_irrigation_flag, spec.out_fertilizer_flag, spec.out_improved_soil_flag]
+    table = build_crop_policy_game_table(factors, players=players, target_col=spec.target_col)
+
+    # Align with crop/wine game_table format as much as possible.
+    table["n_train"] = table["n_rows"].astype(int)
+    table["n_test"] = 0
+    table["seed"] = int(spec.rainfall_random_state)
+    table = table.drop(columns=["n_rows"], errors="ignore")
+
+    table.to_csv(out_path, index=False)
+    print(str(out_path))
+
+    meta_path = out_path.with_name(f"{out_path.stem}__meta.json")
+    meta_path.write_text(dumps_json({"meta": meta}), encoding="utf-8")
+    print(str(meta_path))
+
+
+def run_plot_game_table_scores(
+    *,
+    game_table_csv: Path,
+    out: str | None,
+    score_col: str,
+    bins: int,
+    title: str | None,
+    empty_baseline_csv: str | None,
+    ranked_csv: str | None,
+) -> None:
+    if out:
+        out_path = Path(out)
+    else:
+        out_path = game_table_csv.with_name(f"{game_table_csv.stem}__score_distribution.png")
+
+    cut_points = None
+    if ranked_csv:
+        rdf = pd.read_csv(ranked_csv)
+        if "class_id" not in rdf.columns:
+            raise SystemExit("--ranked-csv must include class_id column (use rank-game-table first).")
+        if score_col not in rdf.columns:
+            raise SystemExit(f"--ranked-csv must include score column {score_col!r}.")
+        higher_is_better = True
+        if "metric" in rdf.columns:
+            ms = rdf["metric"].astype(str).dropna().unique().tolist()
+            if len(ms) == 1 and ms[0] == "mae":
+                higher_is_better = False
+        # Cut points are midpoints between adjacent classes in descending score order.
+        rdf = rdf.sort_values(by=[score_col, "class_id"], ascending=[not higher_is_better, True], kind="mergesort").copy()
+        groups = rdf.groupby("class_id")[score_col]
+        class_max = groups.max().sort_index()
+        class_min = groups.min().sort_index()
+        cps: list[float] = []
+        for cid in range(1, int(class_max.index.max())):
+            if cid not in class_min.index or (cid + 1) not in class_max.index:
+                continue
+            if higher_is_better:
+                upper_min = float(class_min.loc[cid])
+                lower_max = float(class_max.loc[cid + 1])
+                cps.append((upper_min + lower_max) / 2.0)
+            else:
+                upper_max = float(class_max.loc[cid])
+                lower_min = float(class_min.loc[cid + 1])
+                cps.append((upper_max + lower_min) / 2.0)
+        cut_points = cps
+
+    summary = plot_score_distribution(
+        game_table_csv=game_table_csv,
+        out_path=out_path,
+        score_col=str(score_col),
+        bins=int(bins),
+        title=title,
+        empty_baseline_csv=empty_baseline_csv,
+        cut_points=cut_points,
+    )
+    print(str(out_path))
+    # Also print a compact summary for quick copy/paste
+    s = summary["summary"]
+    print(
+        f"n={s['n_used']} missing={s['n_missing']} "
+        f"min={s['min']:.6g} p25={s['p25']:.6g} p50={s['p50']:.6g} p75={s['p75']:.6g} max={s['max']:.6g}"
+    )
+
+
+def run_rank_game_table(
+    *,
+    game_table_csv: Path,
+    out_ranked: str | None,
+    out_classes: str | None,
+    out_summary: str | None,
+    score_col: str,
+    id_col: str,
+    k_max: int | None,
+    k_fixed: int | None,
+    criterion: Criterion,
+    ranked_format: str,
+    plot_out: str | None,
+    heatmap_out: str | None,
+    empty_baseline_csv: str | None,
+    bins: int,
+    title: str | None,
+) -> None:
+    df = pd.read_csv(game_table_csv)
+
+    if empty_baseline_csv:
+        eb = pd.read_csv(empty_baseline_csv)
+        if eb.empty:
+            raise SystemExit(f"--empty-baseline-csv is empty: {empty_baseline_csv}")
+        if score_col not in eb.columns:
+            raise SystemExit(f"--empty-baseline-csv must include score column {score_col!r}.")
+
+        # Infer 0/1 player columns from the game table to identify the empty coalition row.
+        exclude = {
+            str(score_col),
+            "value",
+            "abs_value",
+            "metric",
+            "order",
+            "n_train",
+            "n_test",
+            "seed",
+            "coalition_key",
+            "coalition_id",
+            "class_id",
+            "k_selected",
+            "class_score_max",
+            "class_score_min",
+            "class_size",
+        }
+        player_cols: list[str] = []
+        for c in df.columns:
+            sc = str(c)
+            if sc in exclude:
+                continue
+            s = df[c]
+            if pd.api.types.is_numeric_dtype(s):
+                vals = set(pd.to_numeric(s, errors="coerce").dropna().unique().tolist())
+                if vals.issubset({0, 1}):
+                    player_cols.append(sc)
+
+        eb_row = eb.iloc[[0]].copy()
+        # Align columns
+        for col in df.columns:
+            if col not in eb_row.columns:
+                eb_row[col] = 0 if col in player_cols else pd.NA
+        eb_row = eb_row[df.columns].copy()
+        if "order" in eb_row.columns:
+            eb_row["order"] = 0
+        for col in player_cols:
+            eb_row[col] = 0
+
+        # If an empty coalition row exists in the game table, overwrite its score with the empty baseline.
+        if player_cols:
+            is_empty = (df[player_cols].sum(axis=1) == 0)
+            if "order" in df.columns:
+                is_empty = is_empty & (pd.to_numeric(df["order"], errors="coerce").fillna(0).astype(int) == 0)
+            if bool(is_empty.any()):
+                idx = df.index[is_empty][0]
+                for col in eb_row.columns:
+                    df.at[idx, col] = eb_row.iloc[0][col]
+            else:
+                df = pd.concat([df, eb_row], ignore_index=True)
+        else:
+            df = pd.concat([df, eb_row], ignore_index=True)
+
+    ranked, classes, summary = rank_to_weak_order(
+        df,
+        id_col=str(id_col),
+        score_col=str(score_col),
+        k_max=k_max,
+        k_fixed=k_fixed,
+        criterion=criterion,
+    )
+
+    ranked_format = str(ranked_format).strip().lower()
+    if ranked_format not in {"score-only", "full"}:
+        raise SystemExit("--ranked-format must be one of: score-only, full")
+
+    if ranked_format == "score-only":
+        base_cols = list(df.columns)
+        # Only add class_id (and keep any existing columns, including score_col).
+        keep_cols = [c for c in base_cols if c in ranked.columns] + ["class_id"]
+        ranked_to_write = ranked.loc[:, keep_cols].copy()
+    else:
+        ranked_to_write = ranked
+
+    if out_ranked:
+        ranked_path = Path(out_ranked)
+    else:
+        ranked_path = game_table_csv.with_name(f"{game_table_csv.stem}__ranked.csv")
+    ranked_path.parent.mkdir(parents=True, exist_ok=True)
+    ranked_to_write.to_csv(ranked_path, index=False)
+    print(str(ranked_path))
+
+    if out_classes:
+        classes_path = Path(out_classes)
+    else:
+        classes_path = game_table_csv.with_name(f"{game_table_csv.stem}__classes.json")
+    classes_path.parent.mkdir(parents=True, exist_ok=True)
+    classes_path.write_text(dumps_json({"classes": classes}), encoding="utf-8")
+    print(str(classes_path))
+
+    if out_summary:
+        summary_path = Path(out_summary)
+    else:
+        summary_path = game_table_csv.with_name(f"{game_table_csv.stem}__rank_summary.json")
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(dumps_json({"summary": summary}), encoding="utf-8")
+    print(str(summary_path))
+
+    if plot_out:
+        # Build cut points from ranked output and plot histogram only.
+        run_plot_game_table_scores(
+            game_table_csv=game_table_csv,
+            out=plot_out,
+            score_col=score_col,
+            bins=int(bins),
+            title=title,
+            empty_baseline_csv=empty_baseline_csv,
+            ranked_csv=str(ranked_path),
+        )
+
+    if heatmap_out:
+        heatmap_path = Path(heatmap_out)
+        plot_coalition_feature_heatmap(
+            game_table_csv=game_table_csv,
+            out_path=heatmap_path,
+            score_col=str(score_col),
+            ranked_csv=str(ranked_path),
+        )
+        print(str(heatmap_path))
 
 
 def _load_feature_columns_for_task(dataset_config: Path, *, task: str) -> list[str]:
@@ -471,6 +786,116 @@ def run_analyze_all_datasets(*, configs_root: Path, task: str, out_root: str | N
         print("\n".join(lines))
 
 
+def run_dataset_pipeline(
+    *,
+    dataset_config: Path,
+    labeling_config: Path | None,
+    game_table_config: Path,
+    task: str,
+    k_max: int,
+    criterion: str,
+    ranked_format: str,
+    heatmap_top_n: int,
+    no_progress: bool,
+    skip_preprocess: bool,
+    skip_game_table: bool,
+    dry_run: bool,
+) -> None:
+    paths = infer_pipeline_paths(dataset_config=dataset_config, game_table_config=game_table_config)
+
+    steps: list[tuple[str, dict[str, Any]]] = []
+    if not bool(skip_preprocess):
+        if labeling_config is None:
+            raise SystemExit("--labeling-config is required unless --skip-preprocess is set.")
+        steps.append(
+            (
+                "preprocess",
+                {"dataset_config": dataset_config, "labeling_config": labeling_config},
+            )
+        )
+
+    steps.append(
+        (
+            "build-empty-baseline",
+            {"dataset_config": dataset_config, "game_table_config": game_table_config, "task": task, "out": str(paths.empty_baseline_csv)},
+        )
+    )
+
+    if not bool(skip_game_table):
+        steps.append(
+            (
+                "build-game-table",
+                {
+                    "dataset_config": dataset_config,
+                    "game_table_config": game_table_config,
+                    "task": task,
+                    "out": str(paths.game_table_csv),
+                    "no_progress": bool(no_progress),
+                },
+            )
+        )
+
+    steps.append(
+        (
+            "rank-game-table",
+            {
+                "game_table_csv": Path(paths.game_table_csv),
+                "out_ranked": str(paths.ranked_csv),
+                "out_classes": str(paths.classes_json),
+                "out_summary": str(paths.rank_summary_json),
+                "score_col": "value",
+                "id_col": "coalition_id",
+                "k_max": int(k_max),
+                "k_fixed": None,
+                "criterion": str(criterion),
+                "ranked_format": str(ranked_format),
+                "plot_out": str(paths.score_distribution_png),
+                "heatmap_out": str(paths.heatmap_png),
+                "empty_baseline_csv": str(paths.empty_baseline_csv),
+                "bins": 60,
+                "title": None,
+            },
+        )
+    )
+
+    if bool(dry_run):
+        print("dataset_key:", paths.dataset_key)
+        print("outputs:")
+        print("  game_table:", str(paths.game_table_csv))
+        print("  empty_baseline:", str(paths.empty_baseline_csv))
+        print("  ranked:", str(paths.ranked_csv))
+        print("  score_distribution:", str(paths.score_distribution_png))
+        print("  heatmap:", str(paths.heatmap_png))
+        print("steps:")
+        for name, kwargs in steps:
+            print("-", name, {k: str(v) for k, v in kwargs.items()})
+        return
+
+    for name, kwargs in steps:
+        if name == "preprocess":
+            run_preprocess(Path(kwargs["dataset_config"]), Path(kwargs["labeling_config"]))
+        elif name == "build-empty-baseline":
+            run_build_empty_baseline(**kwargs)  # type: ignore[arg-type]
+        elif name == "build-game-table":
+            run_build_game_table(**kwargs)  # type: ignore[arg-type]
+        elif name == "rank-game-table":
+            # Allow criterion values from args (str) - validated in argparse.
+            kwargs["criterion"] = kwargs["criterion"]  # type: ignore[assignment]
+            run_rank_game_table(**kwargs)  # type: ignore[arg-type]
+        else:
+            raise SystemExit(f"Unknown pipeline step: {name}")
+
+    # Re-render heatmap with requested top_n (rank step outputs a heatmap only if requested there).
+    top_n = int(heatmap_top_n)
+    plot_coalition_feature_heatmap(
+        game_table_csv=paths.game_table_csv,
+        out_path=paths.heatmap_png,
+        score_col="value",
+        top_n=None if top_n == 0 else top_n,
+        ranked_csv=paths.ranked_csv,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bci-xai")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -490,6 +915,68 @@ def build_parser() -> argparse.ArgumentParser:
     build_gt.add_argument("--out", default=None, help="Write to this path (.csv; default: game_table.cache_path)")
     build_gt.add_argument("--no-progress", action="store_true", help="Disable tqdm progress output")
 
+    empty_baseline = subparsers.add_parser(
+        "build-empty-baseline",
+        help="Compute v(empty): uninformative baseline score using labels only (no feature training)",
+    )
+    empty_baseline.add_argument("--dataset-config", default=default_dataset_cfg)
+    empty_baseline.add_argument("--task", default="baseline", choices=["baseline", "next-rank"])
+    empty_baseline.add_argument("--game-table-config", default=default_game_table_cfg, help="Reads game_table.* settings from this file")
+    empty_baseline.add_argument("--out", default=None, help="Write to this path (.csv; default: outputs/<dataset_key>/game_tables/empty_baseline.csv)")
+
+    plot_scores = subparsers.add_parser("plot-game-table-scores", help="Plot distribution of scores in a game table CSV")
+    plot_scores.add_argument("--game-table-csv", required=True, help="Path to game_table.csv (wide format)")
+    plot_scores.add_argument("--out", default=None, help="Write plot to this path (.png; default: <game_table>__score_distribution.png)")
+    plot_scores.add_argument("--score-col", default="value", help="Column to plot (default: value)")
+    plot_scores.add_argument("--bins", type=int, default=50, help="Histogram bins (default: 50)")
+    plot_scores.add_argument("--title", default=None, help="Figure title (default: game_table filename)")
+    plot_scores.add_argument("--empty-baseline-csv", default=None, help="Optional empty_baseline.csv to overlay as a vertical line")
+    plot_scores.add_argument("--ranked-csv", default=None, help="Optional ranked CSV (with class_id) to overlay cut lines")
+
+    plot_heatmap = subparsers.add_parser("plot-game-table-heatmap", help="Plot coalition×feature heatmap (red if feature used)")
+    plot_heatmap.add_argument("--game-table-csv", required=True, help="Path to game_table.csv (wide format)")
+    plot_heatmap.add_argument("--out", default=None, help="Write plot to this path (.png; default: <game_table>__heatmap.png)")
+    plot_heatmap.add_argument("--score-col", default="value", help="Score column used to order rows (default: value)")
+    plot_heatmap.add_argument("--top-n", type=int, default=200, help="Plot top N rows (0=all; default: 200)")
+    plot_heatmap.add_argument("--title", default=None, help="Figure title")
+    plot_heatmap.add_argument("--ranked-csv", default=None, help="Optional ranked CSV to draw class boundaries")
+
+    rank_gt = subparsers.add_parser("rank-game-table", help="Rank coalitions into weak order classes via optimal 1D k-means segmentation")
+    rank_gt.add_argument("--game-table-csv", required=True, help="Path to game_table.csv (wide format)")
+    rank_gt.add_argument("--score-col", default="value", help="Score column to use (default: value)")
+    rank_gt.add_argument("--id-col", default="coalition_id", help="Coalition id column (default: coalition_id; derived if missing)")
+    rank_gt.add_argument("--k-max", type=int, default=None, help="Max number of classes to consider (default: min(20, n))")
+    rank_gt.add_argument("--k-fixed", type=int, default=None, help="Force k classes (overrides criterion)")
+    rank_gt.add_argument("--criterion", default="bic", choices=["bic", "mdl"], help="Model selection criterion (default: bic)")
+    rank_gt.add_argument(
+        "--ranked-format",
+        default="score-only",
+        choices=["score-only", "full"],
+        help="Ranked CSV output columns (default: score-only adds class_id only)",
+    )
+    rank_gt.add_argument("--out-ranked", default=None, help="Write ranked CSV here (default: <game_table>__ranked.csv)")
+    rank_gt.add_argument("--out-classes", default=None, help="Write classes JSON here (default: <game_table>__classes.json)")
+    rank_gt.add_argument("--out-summary", default=None, help="Write summary JSON here (default: <game_table>__rank_summary.json)")
+    rank_gt.add_argument("--plot-out", default=None, help="Also write a plot with cut lines to this path (.png)")
+    rank_gt.add_argument("--heatmap-out", default=None, help="Also write coalition×feature heatmap to this path (.png)")
+    rank_gt.add_argument("--bins", type=int, default=50, help="Histogram bins for --plot-out (default: 50)")
+    rank_gt.add_argument("--title", default=None, help="Figure title for --plot-out")
+    rank_gt.add_argument("--empty-baseline-csv", default=None, help="Optional empty_baseline.csv to overlay as a vertical line on --plot-out")
+
+    pipe = subparsers.add_parser("run-dataset-pipeline", help="Run baseline/ranking/visualization pipeline for one dataset")
+    pipe.add_argument("--dataset-config", required=True)
+    pipe.add_argument("--labeling-config", default=None, help="Required unless --skip-preprocess")
+    pipe.add_argument("--game-table-config", required=True)
+    pipe.add_argument("--task", default="baseline", choices=["baseline", "next-rank"])
+    pipe.add_argument("--k-max", type=int, default=20)
+    pipe.add_argument("--criterion", default="bic", choices=["bic", "mdl"])
+    pipe.add_argument("--ranked-format", default="score-only", choices=["score-only", "full"])
+    pipe.add_argument("--heatmap-top-n", type=int, default=200, help="Top N coalitions for heatmap (0=all; default: 200)")
+    pipe.add_argument("--no-progress", action="store_true", help="Disable tqdm progress output for build-game-table")
+    pipe.add_argument("--skip-preprocess", action="store_true")
+    pipe.add_argument("--skip-game-table", action="store_true", help="Skip build-game-table (assumes cache_path exists)")
+    pipe.add_argument("--dry-run", action="store_true", help="Print planned outputs/steps only")
+
     build_patterns = subparsers.add_parser("build-pattern-table", help="Build a wide 0/1 table of all coalition patterns (no training)")
     build_patterns.add_argument("--dataset-config", default=default_dataset_cfg)
     build_patterns.add_argument("--task", default="baseline", choices=["baseline", "next-rank"])
@@ -507,6 +994,18 @@ def build_parser() -> argparse.ArgumentParser:
     resign_rate.add_argument("--dataset-config", default=default_dataset_cfg)
     resign_rate.add_argument("--out", default=None, help="Write to this path (.csv; default: outputs/<dataset_key>/game_tables/resignation_rate_table.csv)")
     resign_rate.add_argument("--include-empty", action="store_true", help="Include the empty coalition row (baseline resignation rate)")
+
+    crop_policy = subparsers.add_parser(
+        "build-crop-policy-game-table",
+        help="Build a 4-policy (16 patterns) mean-yield table from crop raw data (no training)",
+    )
+    crop_policy.add_argument("--dataset-config", default="configs/datasets/crop/dataset.yml")
+    crop_policy.add_argument(
+        "--out",
+        default=None,
+        help="Write to this path (.csv; default: outputs/<dataset_key>/game_tables/game_table.csv)",
+    )
+    crop_policy.add_argument("--crop", default=None, help="Override crop selection (default: most frequent crop)")
 
     analyze_ds = subparsers.add_parser("analyze-dataset", help="Analyze features/target and write reports under outputs/")
     analyze_ds.add_argument("--dataset-config", default=default_dataset_cfg)
@@ -542,6 +1041,82 @@ def main() -> None:
         )
         return
 
+    if args.command == "build-empty-baseline":
+        run_build_empty_baseline(
+            dataset_config=Path(args.dataset_config),
+            game_table_config=Path(args.game_table_config),
+            task=str(args.task),
+            out=args.out,
+        )
+        return
+
+    if args.command == "plot-game-table-scores":
+        run_plot_game_table_scores(
+            game_table_csv=Path(args.game_table_csv),
+            out=args.out,
+            score_col=str(args.score_col),
+            bins=int(args.bins),
+            title=args.title,
+            empty_baseline_csv=args.empty_baseline_csv,
+            ranked_csv=args.ranked_csv,
+        )
+        return
+
+    if args.command == "plot-game-table-heatmap":
+        game_table_csv = Path(args.game_table_csv)
+        if args.out:
+            out_path = Path(args.out)
+        else:
+            out_path = game_table_csv.with_name(f"{game_table_csv.stem}__heatmap.png")
+        top_n = int(args.top_n)
+        plot_coalition_feature_heatmap(
+            game_table_csv=game_table_csv,
+            out_path=out_path,
+            score_col=str(args.score_col),
+            top_n=None if top_n == 0 else top_n,
+            title=args.title,
+            ranked_csv=args.ranked_csv,
+        )
+        print(str(out_path))
+        return
+
+    if args.command == "rank-game-table":
+        run_rank_game_table(
+            game_table_csv=Path(args.game_table_csv),
+            out_ranked=args.out_ranked,
+            out_classes=args.out_classes,
+            out_summary=args.out_summary,
+            score_col=str(args.score_col),
+            id_col=str(args.id_col),
+            k_max=args.k_max,
+            k_fixed=args.k_fixed,
+            criterion=args.criterion,  # type: ignore[arg-type]
+            ranked_format=str(args.ranked_format),
+            plot_out=args.plot_out,
+            heatmap_out=args.heatmap_out,
+            empty_baseline_csv=args.empty_baseline_csv,
+            bins=int(args.bins),
+            title=args.title,
+        )
+        return
+
+    if args.command == "run-dataset-pipeline":
+        run_dataset_pipeline(
+            dataset_config=Path(args.dataset_config),
+            labeling_config=Path(args.labeling_config) if args.labeling_config else None,
+            game_table_config=Path(args.game_table_config),
+            task=str(args.task),
+            k_max=int(args.k_max),
+            criterion=str(args.criterion),
+            ranked_format=str(args.ranked_format),
+            heatmap_top_n=int(args.heatmap_top_n),
+            no_progress=bool(args.no_progress),
+            skip_preprocess=bool(args.skip_preprocess),
+            skip_game_table=bool(args.skip_game_table),
+            dry_run=bool(args.dry_run),
+        )
+        return
+
     if args.command == "build-pattern-table":
         run_build_pattern_table(
             dataset_config=Path(args.dataset_config),
@@ -567,6 +1142,10 @@ def main() -> None:
             out=args.out,
             include_empty=bool(args.include_empty),
         )
+        return
+
+    if args.command == "build-crop-policy-game-table":
+        run_build_crop_policy_game_table(dataset_config=Path(args.dataset_config), out=args.out, crop=args.crop)
         return
 
     if args.command == "analyze-dataset":
